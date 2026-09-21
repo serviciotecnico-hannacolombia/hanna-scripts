@@ -6,8 +6,8 @@
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/TU_USUARIO/hanna-scripts/main/panel-hanna.user.js
-// @downloadURL  https://raw.githubusercontent.com/TU_USUARIO/hanna-scripts/main/panel-hanna.user.js
+// @updateURL    https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/panel-hanna.user.js
+// @downloadURL  https://raw.githubusercontent.com/serviciotecnico-hannacolombia/main/panel-hanna.user.js
 // ==/UserScript==
 
 (function() {
