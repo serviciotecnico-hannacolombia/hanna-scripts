@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      13.0
+// @version      13.1
 // @description  Panel completo con mediciones, patrones de T° y 3 estándares para turbidez HI93703
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -12,6 +12,9 @@
 
 (function() {
     'use strict';
+
+    // Debe coincidir siempre con @version del header de arriba.
+    var APP_VERSION = '13.1';
 
     var columnasPorFilaLecturas = 3;
 
@@ -251,7 +254,7 @@
     contenedor.style.fontFamily = 'Arial, sans-serif';
 
     var btnPrincipal = document.createElement('button');
-    btnPrincipal.innerText = '⚙️ Panel Hanna ▴';
+    btnPrincipal.innerText = '⚙️ Panel Hanna v' + APP_VERSION + ' ▴';
     btnPrincipal.type = 'button';
     btnPrincipal.style.padding = '10px 16px';
     btnPrincipal.style.backgroundColor = '#0056b3';
@@ -354,6 +357,14 @@
         b.onclick = accion;
         return b;
     }
+
+    var etiquetaVersion = document.createElement('div');
+    etiquetaVersion.innerText = 'Panel Hanna — versión ' + APP_VERSION;
+    etiquetaVersion.style.fontSize = '10px';
+    etiquetaVersion.style.color = '#6c757d';
+    etiquetaVersion.style.textAlign = 'right';
+    etiquetaVersion.style.marginBottom = '4px';
+    panel.appendChild(etiquetaVersion);
 
     // ------------------------------------------
     // SECCIÓN 1. MEDICIONES / LECTURAS
