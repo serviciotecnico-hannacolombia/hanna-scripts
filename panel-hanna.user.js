@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      13.3
+// @version      13.4
 // @description  Panel completo con mediciones, patrones de T° y 3 estándares para turbidez HI93703
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '13.3';
+    var APP_VERSION = '13.4';
 
     var columnasPorFilaLecturas = 3;
 
@@ -340,9 +340,6 @@
         { categoria: 'Turbidez', items: [
             { clave: 'turbi_hi93703', etiqueta: '🌀 Turbidez HI 93703 (3 Patrones)' },
             { clave: 'turbi_hi98703', etiqueta: '🌀 Turbidez HI 98703' }
-        ]},
-        { categoria: 'Otros', items: [
-            { clave: '__borrar__', etiqueta: '🗑️ Borrar esta tabla' }
         ]}
     ];
 
@@ -368,11 +365,23 @@
         { categoria: 'Turbidez', items: [
             { clave: 'turbi_hi93703', etiqueta: '🌀 Soluciones Turbidez HI 93703' },
             { clave: 'turbi_hi98703', etiqueta: '🌀 Soluciones Turbidez HI 98703' }
-        ]},
-        { categoria: 'Otros', items: [
-            { clave: '__borrar__', etiqueta: '🗑️ Borrar soluciones' }
         ]}
     ];
+
+    function crearBotonIcono(icono, titulo, colorBorde, accion) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.innerText = icono;
+        b.title = titulo;
+        b.style.padding = '4px 8px';
+        b.style.fontSize = '12px';
+        b.style.border = '1px solid ' + colorBorde;
+        b.style.borderRadius = '4px';
+        b.style.backgroundColor = '#fff';
+        b.style.cursor = 'pointer';
+        b.onclick = accion;
+        return b;
+    }
 
     function crearSelectorInline(opciones, colorBorde, placeholder, onSeleccionar) {
         var barra = document.createElement('div');
@@ -433,16 +442,16 @@
         return true;
     }
 
-    var controlesInyectados = { iniciales: false, finales: false, soluciones: false };
+    var controlesInyectados = { iniciales: false, finales: false, soluciones: false, badge: false };
 
     function intentarInyectarControles() {
         if (!controlesInyectados.iniciales) {
             var refIni = document.querySelector('input[name^="' + PREFIJO_MEDICIONES_INICIALES + '"]');
             if (refIni) {
                 var barraIni = crearSelectorInline(opcionesLecturas, '#17a2b8', '🧪 Autocompletar Mediciones Iniciales…', function(clave) {
-                    if (clave === '__borrar__') borrarLecturas();
-                    else llenarLecturas(lecturas[clave]);
+                    llenarLecturas(lecturas[clave]);
                 });
+                barraIni.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Mediciones Iniciales', '#17a2b8', borrarLecturas));
                 if (anclarAntesDeTabla(refIni, barraIni)) controlesInyectados.iniciales = true;
             }
         }
@@ -451,9 +460,9 @@
             var refFin = document.querySelector('input[name^="' + PREFIJO_MEDICIONES_FINALES + '"]');
             if (refFin) {
                 var barraFin = crearSelectorInline(opcionesLecturas, '#17a2b8', '🧪 Autocompletar Mediciones Finales…', function(clave) {
-                    if (clave === '__borrar__') borrarMedicionesFinales();
-                    else llenarMedicionesFinales(lecturas[clave]);
+                    llenarMedicionesFinales(lecturas[clave]);
                 });
+                barraFin.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Mediciones Finales', '#17a2b8', borrarMedicionesFinales));
                 if (anclarAntesDeTabla(refFin, barraFin)) controlesInyectados.finales = true;
             }
         }
@@ -462,27 +471,18 @@
             var refSol = document.querySelector('input[name^="' + PREFIJO_SOLUCIONES + '"]');
             if (refSol) {
                 var barraSol = crearSelectorInline(opcionesSoluciones, '#28a745', '🧴 Autocompletar Soluciones Estándar…', function(clave) {
-                    if (clave === '__borrar__') borrarSolucionesSecuencial();
-                    else llenarSolucionesSecuencial(obtenerSoluciones()[clave]);
+                    llenarSolucionesSecuencial(obtenerSoluciones()[clave]);
                 });
-                var btnEditar = document.createElement('button');
-                btnEditar.type = 'button';
-                btnEditar.innerText = '✏️';
-                btnEditar.title = 'Abrir el Google Sheet de lotes/vencimientos';
-                btnEditar.style.padding = '4px 8px';
-                btnEditar.style.fontSize = '12px';
-                btnEditar.style.border = '1px solid #28a745';
-                btnEditar.style.borderRadius = '4px';
-                btnEditar.style.backgroundColor = '#fff';
-                btnEditar.style.cursor = 'pointer';
-                btnEditar.onclick = abrirEditorSheet;
-                barraSol.appendChild(btnEditar);
+                barraSol.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Soluciones Estándar', '#28a745', borrarSolucionesSecuencial));
+                barraSol.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de lotes/vencimientos', '#28a745', abrirEditorSheet));
 
                 if (anclarAntesDeTabla(refSol, barraSol)) controlesInyectados.soluciones = true;
             }
         }
 
-        if (controlesInyectados.iniciales && controlesInyectados.finales && controlesInyectados.soluciones && observadorDOM) {
+        intentarInyectarBadge();
+
+        if (controlesInyectados.iniciales && controlesInyectados.finales && controlesInyectados.soluciones && controlesInyectados.badge && observadorDOM) {
             observadorDOM.disconnect();
         }
     }
@@ -496,19 +496,32 @@
         if (!controlesInyectados.iniciales) faltantes.push(PREFIJO_MEDICIONES_INICIALES);
         if (!controlesInyectados.finales) faltantes.push(PREFIJO_MEDICIONES_FINALES);
         if (!controlesInyectados.soluciones) faltantes.push(PREFIJO_SOLUCIONES);
+        if (!controlesInyectados.badge) faltantes.push('encabezado "Informe" (para la insignia de versión)');
         if (faltantes.length > 0) {
-            console.warn('[Panel Hanna] No se encontraron todavía estos campos en la página (puede ser normal si el "Tipo de Informe" aún no se seleccionó): ' + faltantes.join(', '));
+            console.warn('[Panel Hanna] No se encontraron todavía estos elementos en la página (puede ser normal si el "Tipo de Informe" aún no se seleccionó): ' + faltantes.join(', '));
         }
     }, 5000);
 
     // ------------------------------------------
-    // INSIGNIA DISCRETA: versión + sincronización de lotes + respaldo
+    // INSIGNIA FIJA JUNTO AL ENCABEZADO "INFORME": versión + sincronización + respaldo
     // ------------------------------------------
+    // A diferencia de las anteriores, esta insignia no flota sobre la página: se inserta
+    // dentro del flujo normal del documento, justo debajo del encabezado "Informe".
+
+    function encontrarEncabezadoInforme() {
+        var encabezados = document.querySelectorAll('h1, h2, h3, h4, legend');
+        for (var i = 0; i < encabezados.length; i++) {
+            if (encabezados[i].textContent.trim() === 'Informe') return encabezados[i];
+        }
+        return null;
+    }
+
     var badge = document.createElement('div');
-    badge.style.position = 'fixed';
-    badge.style.bottom = '15px';
-    badge.style.right = '15px';
-    badge.style.zIndex = '99999';
+    badge.style.display = 'flex';
+    badge.style.flexDirection = 'column';
+    badge.style.alignItems = 'flex-start';
+    badge.style.gap = '4px';
+    badge.style.margin = '6px 0 12px 0';
     badge.style.fontFamily = 'Arial, sans-serif';
 
     var btnBadge = document.createElement('button');
@@ -522,17 +535,16 @@
     btnBadge.style.cursor = 'pointer';
     btnBadge.style.fontSize = '11px';
     btnBadge.style.fontWeight = 'bold';
-    btnBadge.style.boxShadow = '0 2px 6px rgba(0,0,0,0.25)';
+    btnBadge.style.boxShadow = '0 2px 6px rgba(0,0,0,0.2)';
 
     var miniPanel = document.createElement('div');
     miniPanel.style.display = 'none';
     miniPanel.style.flexDirection = 'column';
     miniPanel.style.gap = '6px';
-    miniPanel.style.marginBottom = '8px';
     miniPanel.style.backgroundColor = '#f8f9fa';
     miniPanel.style.padding = '10px';
     miniPanel.style.borderRadius = '8px';
-    miniPanel.style.boxShadow = '0 6px 16px rgba(0,0,0,0.25)';
+    miniPanel.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
     miniPanel.style.border = '1px solid #dee2e6';
     miniPanel.style.width = '260px';
     miniPanel.style.fontSize = '11px';
@@ -583,9 +595,17 @@
         miniPanel.style.display = (miniPanel.style.display === 'none') ? 'flex' : 'none';
     };
 
-    badge.appendChild(miniPanel);
     badge.appendChild(btnBadge);
-    document.body.appendChild(badge);
+    badge.appendChild(miniPanel);
+
+    function intentarInyectarBadge() {
+        if (controlesInyectados.badge) return;
+        var encabezado = encontrarEncabezadoInforme();
+        if (encabezado && encabezado.parentNode) {
+            encabezado.parentNode.insertBefore(badge, encabezado.nextSibling);
+            controlesInyectados.badge = true;
+        }
+    }
 
     // Carga inicial de lotes: primero lo que quedó en caché (instantáneo),
     // luego intenta refrescar desde el Sheet en segundo plano.
@@ -593,7 +613,7 @@
     actualizarEtiquetaSheetSync();
     cargarDatosSheet(actualizarEtiquetaSheetSync);
 
-    // Primer intento de inyección (por si las tablas ya están en el DOM al cargar).
+    // Primer intento de inyección (por si todo ya está en el DOM al cargar).
     intentarInyectarControles();
 
 })();
