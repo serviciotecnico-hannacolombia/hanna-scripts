@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      13.4
+// @version      13.5
 // @description  Panel completo con mediciones, patrones de T° y 3 estándares para turbidez HI93703
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,16 +14,17 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '13.4';
+    var APP_VERSION = '13.5';
 
     var columnasPorFilaLecturas = 3;
 
     // ==========================================
     // 0. LOTES Y VENCIMIENTOS DESDE GOOGLE SHEETS
     // ==========================================
-    // La hoja debe tener, en este orden, las columnas: codigo | lote | vencimiento
+    // La hoja debe tener, en este orden, las columnas: codigo | lote | vencimiento | descripcion
     // (con encabezado en la fila 1). El "codigo" debe coincidir exacto con los
-    // códigos usados abajo (HI7004L, HI7031L, etc).
+    // códigos usados abajo (HI7004L, HI7031L, etc). La columna "descripcion" es
+    // opcional: si una fila la deja vacía, se usa la descripción por defecto del script.
     //
     // Cómo obtener las dos URLs de abajo:
     //  1. SHEET_CSV_URL: en el Sheet -> Archivo -> Compartir -> Publicar en la web
@@ -35,7 +36,7 @@
     var SHEET_EDIT_URL = 'https://docs.google.com/spreadsheets/d/1AzJX5B-myRtumple68r7ZXGpE7Xc3nLtkddG5i9rD98/edit?gid=0#gid=0';
 
     var CACHE_KEY = 'hanna_sheet_cache_v1';
-    var datosSheet = {};       // { "HI7004L": { lote: "2459", venc: "11/2030" }, ... }
+    var datosSheet = {};       // { "HI7004L": { lote: "2459", venc: "11/2030", desc: "Buffer pH 4.01" }, ... }
     var sheetUltimaActualizacion = null;
 
     // Parser CSV simple (soporta campos entre comillas con comas dentro).
@@ -59,8 +60,8 @@
     function aplicarFilasSheet(filas) {
         var nuevo = {};
         filas.forEach(function(campos) {
-            var codigo = campos[0], lote = campos[1], venc = campos[2];
-            if (codigo) nuevo[codigo] = { lote: lote || '', venc: venc || '' };
+            var codigo = campos[0], lote = campos[1], venc = campos[2], desc = campos[3];
+            if (codigo) nuevo[codigo] = { lote: lote || '', venc: venc || '', desc: desc || '' };
         });
         datosSheet = nuevo;
     }
@@ -108,6 +109,10 @@
 
     function getVenc(codigo, defecto) {
         return (datosSheet[codigo] && datosSheet[codigo].venc) || defecto;
+    }
+
+    function getDescripcion(codigo, defecto) {
+        return (datosSheet[codigo] && datosSheet[codigo].desc) || defecto;
     }
 
     function abrirEditorSheet() {
@@ -168,58 +173,58 @@
         turbi_hi98703: ["0.10 NTU", "0.10 NTU@25°C", "±2% o 0.02 NTU lo que sea >","15.0 NTU", "15.0 NTU@25°C", "±2% o 0.02 NTU lo que sea >","100 NTU", "100 NTU@25°C", "±2% o 0.02 NTU lo que sea >","750 NTU", "750 NTU@25°C", "±2% o 0.02 NTU lo que sea >"]
     };
 
-    // SOLUCIONES ESTÁNDAR (Dinámicas por Lote)
+    // SOLUCIONES ESTÁNDAR (Dinámicas por Lote, Vencimiento y Descripción)
     function obtenerSoluciones() {
         return {
             ph: [
-                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), "Buffer pH 4.01",
-                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), "Buffer pH 7.01",
-                "HI7010L", getLote("HI7010L", "L0003"), getVenc("HI7010L", "2028-01"), "Buffer pH 10.01"
+                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), getDescripcion("HI7004L", "Buffer pH 4.01"),
+                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), getDescripcion("HI7007L", "Buffer pH 7.01"),
+                "HI7010L", getLote("HI7010L", "L0003"), getVenc("HI7010L", "2028-01"), getDescripcion("HI7010L", "Buffer pH 10.01")
             ],
             cond_us: [
-                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), "Conductividad 1413 uS/cm",
-                "HI7033L", getLote("HI7033L", "C0002"), getVenc("HI7033L", "2028-01"), "Conductividad 84 uS/cm"
+                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), getDescripcion("HI7031L", "Conductividad 1413 uS/cm"),
+                "HI7033L", getLote("HI7033L", "C0002"), getVenc("HI7033L", "2028-01"), getDescripcion("HI7033L", "Conductividad 84 uS/cm")
             ],
             cond_ms: [
-                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), "Conductividad 12880 uS/cm"
+                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), getDescripcion("HI7030L", "Conductividad 12880 uS/cm")
             ],
             cond_potenciometrica: [
-                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), "Estándar Cond. Potenciométrica 1413 uS/cm",
-                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), "Estándar Cond. Potenciométrica 12880 uS/cm"
+                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), getDescripcion("HI7031L", "Estándar Cond. Potenciométrica 1413 uS/cm"),
+                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), getDescripcion("HI7030L", "Estándar Cond. Potenciométrica 12880 uS/cm")
             ],
             oxigeno: [
-                "HI7040L", getLote("HI7040L", "D0001"), getVenc("HI7040L", "2028-01"), "Cero Oxígeno Disuelto"
+                "HI7040L", getLote("HI7040L", "D0001"), getVenc("HI7040L", "2028-01"), getDescripcion("HI7040L", "Cero Oxígeno Disuelto")
             ],
             ph_cond_us: [
-                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), "Buffer pH 4.01",
-                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), "Buffer pH 7.01",
-                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), "Conductividad 1413 uS/cm"
+                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), getDescripcion("HI7004L", "Buffer pH 4.01"),
+                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), getDescripcion("HI7007L", "Buffer pH 7.01"),
+                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), getDescripcion("HI7031L", "Conductividad 1413 uS/cm")
             ],
             ph_cond_ms: [
-                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), "Buffer pH 4.01",
-                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), "Buffer pH 7.01",
-                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), "Conductividad 12880 uS/cm"
+                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), getDescripcion("HI7004L", "Buffer pH 4.01"),
+                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), getDescripcion("HI7007L", "Buffer pH 7.01"),
+                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), getDescripcion("HI7030L", "Conductividad 12880 uS/cm")
             ],
             multiparametro: [
-                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), "Buffer pH 4.01",
-                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), "Buffer pH 7.01",
-                "HI7010L", getLote("HI7010L", "L0003"), getVenc("HI7010L", "2028-01"), "Buffer pH 10.01",
-                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), "Conductividad 1413 uS/cm",
-                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), "Conductividad 12880 uS/cm",
-                "HI7040L", getLote("HI7040L", "D0001"), getVenc("HI7040L", "2028-01"), "Cero Oxígeno Disuelto",
-                "HI9828-1", getLote("HI9828-1", "M0001"), getVenc("HI9828-1", "2028-01"), "Calibración Rápida Quick Cal"
+                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), getDescripcion("HI7004L", "Buffer pH 4.01"),
+                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), getDescripcion("HI7007L", "Buffer pH 7.01"),
+                "HI7010L", getLote("HI7010L", "L0003"), getVenc("HI7010L", "2028-01"), getDescripcion("HI7010L", "Buffer pH 10.01"),
+                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), getDescripcion("HI7031L", "Conductividad 1413 uS/cm"),
+                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), getDescripcion("HI7030L", "Conductividad 12880 uS/cm"),
+                "HI7040L", getLote("HI7040L", "D0001"), getVenc("HI7040L", "2028-01"), getDescripcion("HI7040L", "Cero Oxígeno Disuelto"),
+                "HI9828-1", getLote("HI9828-1", "M0001"), getVenc("HI9828-1", "2028-01"), getDescripcion("HI9828-1", "Calibración Rápida Quick Cal")
             ],
-            fotometria: ["HI93701-01", getLote("HI93701-01", "F0001"), getVenc("HI93701-01", "2028-01"), "Reactivo Cloro Libre"],
-            espectrofotometria: ["HI801-11", getLote("HI801-11", "E0001"), getVenc("HI801-11", "2028-01"), "Filtros Calibración Espectrofotómetro"],
-            absorbancia: ["HI76404", getLote("HI76404", "A0001"), getVenc("HI76404", "2028-01"), "Patrón Absorbancia Calibración"],
-            checkers: ["HI701-25", getLote("HI701-25", "K0001"), getVenc("HI701-25", "2028-01"), "Reactivo Checker Cloro Libre"],
+            fotometria: ["HI93701-01", getLote("HI93701-01", "F0001"), getVenc("HI93701-01", "2028-01"), getDescripcion("HI93701-01", "Reactivo Cloro Libre")],
+            espectrofotometria: ["HI801-11", getLote("HI801-11", "E0001"), getVenc("HI801-11", "2028-01"), getDescripcion("HI801-11", "Filtros Calibración Espectrofotómetro")],
+            absorbancia: ["HI76404", getLote("HI76404", "A0001"), getVenc("HI76404", "2028-01"), getDescripcion("HI76404", "Patrón Absorbancia Calibración")],
+            checkers: ["HI701-25", getLote("HI701-25", "K0001"), getVenc("HI701-25", "2028-01"), getDescripcion("HI701-25", "Reactivo Checker Cloro Libre")],
             turbi_hi93703: [
-                "HI93703-0", getLote("HI93703-0", "T0001"), getVenc("HI93703-0", "2028-01"), "Estándar 0 FTU",
-                "HI93703-10", getLote("HI93703-10", "T0002"), getVenc("HI93703-10", "2028-01"), "Estándar 10 FTU",
-                "HI93703-50", getLote("HI93703-50", "T0003"), getVenc("HI93703-50", "2028-01"), "Estándar 50 FTU"
+                "HI93703-0", getLote("HI93703-0", "T0001"), getVenc("HI93703-0", "2028-01"), getDescripcion("HI93703-0", "Estándar 0 FTU"),
+                "HI93703-10", getLote("HI93703-10", "T0002"), getVenc("HI93703-10", "2028-01"), getDescripcion("HI93703-10", "Estándar 10 FTU"),
+                "HI93703-50", getLote("HI93703-50", "T0003"), getVenc("HI93703-50", "2028-01"), getDescripcion("HI93703-50", "Estándar 50 FTU")
             ],
             turbi_hi98703: [
-                "HI98703-11", getLote("HI98703-11", "T0004"), getVenc("HI98703-11", "2028-01"), "Kit Estándares NTU"
+                "HI98703-11", getLote("HI98703-11", "T0004"), getVenc("HI98703-11", "2028-01"), getDescripcion("HI98703-11", "Kit Estándares NTU")
             ]
         };
     }
