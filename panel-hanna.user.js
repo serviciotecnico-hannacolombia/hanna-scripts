@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      13.2
+// @version      13.3
 // @description  Panel completo con mediciones, patrones de T° y 3 estándares para turbidez HI93703
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '13.2';
+    var APP_VERSION = '13.3';
 
     var columnasPorFilaLecturas = 3;
 
@@ -228,10 +228,21 @@
     // 2. FUNCIONES DE AUTOMATIZACIÓN
     // ==========================================
 
-    function llenarLecturas(matrizDatos) {
-        var inputs = document.querySelectorAll('input[name^="mediciones_iniciales"]');
-        if (inputs.length === 0) return alert('No se encontraron campos de mediciones.');
+    // Prefijo real (atributo "name") de los campos de "Mediciones Finales" en la página.
+    // Es una suposición basada en el patrón "mediciones_iniciales" que ya usa el sitio;
+    // si al probar sale la alerta de "No se encontraron campos", inspecciona un campo de
+    // esa tabla (clic derecho → Inspeccionar) y avísale a Brayan el nombre real para
+    // cambiar esta única línea.
+    var PREFIJO_MEDICIONES_FINALES = 'mediciones_finales';
+    var PREFIJO_MEDICIONES_INICIALES = 'mediciones_iniciales';
+    var PREFIJO_SOLUCIONES = 'soluciones_codigo';
 
+    function llenarTablaMediciones(prefijoNombre, matrizDatos) {
+        var inputs = document.querySelectorAll('input[name^="' + prefijoNombre + '"]');
+        if (inputs.length === 0) {
+            alert('No se encontraron campos para "' + prefijoNombre + '". Puede que el nombre real del campo en la página sea distinto — revísalo con Inspeccionar elemento y avísale a Brayan.');
+            return;
+        }
         var inicio = columnasPorFilaLecturas;
         for (var i = inicio; i < inputs.length; i++) {
             var idx = i - inicio;
@@ -243,8 +254,8 @@
         }
     }
 
-    function borrarLecturas() {
-        var inputs = document.querySelectorAll('input[name^="mediciones_iniciales"]');
+    function borrarTablaMediciones(prefijoNombre) {
+        var inputs = document.querySelectorAll('input[name^="' + prefijoNombre + '"]');
         for (var i = columnasPorFilaLecturas; i < inputs.length; i++) {
             inputs[i].value = '';
             inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
@@ -252,8 +263,13 @@
         }
     }
 
+    function llenarLecturas(matrizDatos) { llenarTablaMediciones(PREFIJO_MEDICIONES_INICIALES, matrizDatos); }
+    function borrarLecturas() { borrarTablaMediciones(PREFIJO_MEDICIONES_INICIALES); }
+    function llenarMedicionesFinales(matrizDatos) { llenarTablaMediciones(PREFIJO_MEDICIONES_FINALES, matrizDatos); }
+    function borrarMedicionesFinales() { borrarTablaMediciones(PREFIJO_MEDICIONES_FINALES); }
+
     function llenarSolucionesSecuencial(listaDatos) {
-        var inputs = document.querySelectorAll('input[name^="soluciones_codigo"], table input[name*="soluciones"]');
+        var inputs = document.querySelectorAll('input[name^="' + PREFIJO_SOLUCIONES + '"], table input[name*="soluciones"]');
         if (inputs.length === 0) inputs = document.querySelectorAll('input[type="text"]');
         if (inputs.length === 0) return alert('No se encontraron campos de soluciones.');
 
@@ -269,7 +285,7 @@
     }
 
     function borrarSolucionesSecuencial() {
-        var inputs = document.querySelectorAll('input[name^="soluciones_codigo"], table input[name*="soluciones"]');
+        var inputs = document.querySelectorAll('input[name^="' + PREFIJO_SOLUCIONES + '"], table input[name*="soluciones"]');
         for (var i = 0; i < inputs.length; i++) {
             inputs[i].value = '';
             inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
@@ -278,109 +294,265 @@
     }
 
     // ==========================================
-    // 3. INTERFAZ GRÁFICA ORGANIZADA
+    // 3. INTERFAZ: SELECTORES DISCRETOS JUNTO A CADA TABLA
     // ==========================================
+    // En vez de un panel flotante gigante, cada tabla del formulario (Mediciones
+    // Iniciales, Mediciones Finales, Soluciones Estándar) recibe un <select> chiquito
+    // justo encima suyo. Eliges la opción y se llena esa tabla — nada se despliega.
+    // Como el formulario es dinámico (las tablas aparecen después de elegir el "Tipo
+    // de Informe"), un MutationObserver reintenta insertar los selectores cada vez
+    // que el DOM cambia, hasta lograrlo.
 
-    var contenedor = document.createElement('div');
-    contenedor.style.position = 'fixed';
-    contenedor.style.bottom = '15px';
-    contenedor.style.right = '15px';
-    contenedor.style.zIndex = '99999';
-    contenedor.style.fontFamily = 'Arial, sans-serif';
+    var opcionesLecturas = [
+        { categoria: 'pH', items: [
+            { clave: 'ph_temp_1dec', etiqueta: '🧪 pH / T° (1 Dec)' },
+            { clave: 'ph_temp_2dec', etiqueta: '🧪 pH / T° (2 Dec)' },
+            { clave: 'ph_mv_temp', etiqueta: '🧪 pH / mV / T°' }
+        ]},
+        { categoria: 'Conductividad', items: [
+            { clave: 'cond_us', etiqueta: '⚡ Conductividad (µS/cm)' },
+            { clave: 'cond_ms', etiqueta: '⚡ Conductividad (mS/cm)' },
+            { clave: 'cond_potenciometrica', etiqueta: '⚡ Cond. Potenciométrica' }
+        ]},
+        { categoria: 'Oxígeno', items: [
+            { clave: 'oxigeno', etiqueta: '💧 Oxígeno Disuelto' }
+        ]},
+        { categoria: 'Equipos combinados', items: [
+            { clave: 'ph_cond_us_temp_1dec', etiqueta: '🔀 pH / Cond (µS) / T° (1 Dec)' },
+            { clave: 'ph_cond_us_temp_2dec', etiqueta: '🔀 pH / Cond (µS) / T° (2 Dec)' },
+            { clave: 'ph_cond_ms_temp_1dec', etiqueta: '🔀 pH / Cond (mS) / T° (1 Dec)' },
+            { clave: 'ph_cond_ms_temp_2dec', etiqueta: '🔀 pH / Cond (mS) / T° (2 Dec)' },
+            { clave: 'ph_oxigeno_temp', etiqueta: '🔀 pH / Oxígeno / T°' },
+            { clave: 'multi_completo', etiqueta: '📊 Multiparámetro Completo' }
+        ]},
+        { categoria: 'Fotometría y óptica', items: [
+            { clave: 'foto_cloro_ph', etiqueta: '💡 Fotometría (Cloro L, T, pH)' },
+            { clave: 'foto_hi97xx_cloro', etiqueta: '💡 Fotometría HI97XX (Cloro Libre)' },
+            { clave: 'espectrofotometria', etiqueta: '💡 Espectrofotometría' },
+            { clave: 'absorbancia', etiqueta: '💡 Fotometría de Absorbancia' }
+        ]},
+        { categoria: 'Checkers', items: [
+            { clave: 'checker_cloro_libre', etiqueta: '🟩 Checker Cloro Libre' },
+            { clave: 'checker_cloro_total', etiqueta: '🟩 Checker Cloro Total' },
+            { clave: 'checker_hierro', etiqueta: '🟩 Checker Hierro' },
+            { clave: 'checker_color', etiqueta: '🟩 Checker Color de Agua' }
+        ]},
+        { categoria: 'Turbidez', items: [
+            { clave: 'turbi_hi93703', etiqueta: '🌀 Turbidez HI 93703 (3 Patrones)' },
+            { clave: 'turbi_hi98703', etiqueta: '🌀 Turbidez HI 98703' }
+        ]},
+        { categoria: 'Otros', items: [
+            { clave: '__borrar__', etiqueta: '🗑️ Borrar esta tabla' }
+        ]}
+    ];
 
-    var btnPrincipal = document.createElement('button');
-    btnPrincipal.innerText = '⚙️ Panel Hanna v' + APP_VERSION + ' ▴';
-    btnPrincipal.type = 'button';
-    btnPrincipal.style.padding = '10px 16px';
-    btnPrincipal.style.backgroundColor = '#0056b3';
-    btnPrincipal.style.color = '#fff';
-    btnPrincipal.style.border = 'none';
-    btnPrincipal.style.borderRadius = '6px';
-    btnPrincipal.style.cursor = 'pointer';
-    btnPrincipal.style.fontWeight = 'bold';
-    btnPrincipal.style.boxShadow = '0 4px 8px rgba(0,0,0,0.3)';
+    var opcionesSoluciones = [
+        { categoria: 'Individuales', items: [
+            { clave: 'ph', etiqueta: '🧴 Soluciones pH' },
+            { clave: 'cond_us', etiqueta: '🧴 Soluciones Cond (µS/cm)' },
+            { clave: 'cond_ms', etiqueta: '🧴 Soluciones Cond (mS/cm)' },
+            { clave: 'cond_potenciometrica', etiqueta: '🧴 Soluciones Cond. Potenciométrica' },
+            { clave: 'oxigeno', etiqueta: '🧴 Soluciones Oxígeno' }
+        ]},
+        { categoria: 'Combinados', items: [
+            { clave: 'ph_cond_us', etiqueta: '🔀 Soluciones pH + Cond (µS/cm)' },
+            { clave: 'ph_cond_ms', etiqueta: '🔀 Soluciones pH + Cond (mS/cm)' },
+            { clave: 'multiparametro', etiqueta: '📊 Soluciones Multiparámetro Completo' }
+        ]},
+        { categoria: 'Fotometría / ópticos', items: [
+            { clave: 'fotometria', etiqueta: '🧴 Reactivos Fotometría' },
+            { clave: 'espectrofotometria', etiqueta: '🧴 Reactivos Espectrofotometría' },
+            { clave: 'absorbancia', etiqueta: '🧴 Patrones de Absorbancia' },
+            { clave: 'checkers', etiqueta: '🧴 Reactivos Checkers' }
+        ]},
+        { categoria: 'Turbidez', items: [
+            { clave: 'turbi_hi93703', etiqueta: '🌀 Soluciones Turbidez HI 93703' },
+            { clave: 'turbi_hi98703', etiqueta: '🌀 Soluciones Turbidez HI 98703' }
+        ]},
+        { categoria: 'Otros', items: [
+            { clave: '__borrar__', etiqueta: '🗑️ Borrar soluciones' }
+        ]}
+    ];
 
-    var panel = document.createElement('div');
-    panel.style.display = 'none';
-    panel.style.flexDirection = 'column';
-    panel.style.gap = '6px';
-    panel.style.marginBottom = '10px';
-    panel.style.backgroundColor = '#f8f9fa';
-    panel.style.padding = '12px';
-    panel.style.borderRadius = '8px';
-    panel.style.boxShadow = '0 6px 16px rgba(0,0,0,0.25)';
-    panel.style.border = '1px solid #dee2e6';
-    panel.style.width = '310px';
-    panel.style.maxHeight = '80vh';
-    panel.style.overflowY = 'auto';
+    function crearSelectorInline(opciones, colorBorde, placeholder, onSeleccionar) {
+        var barra = document.createElement('div');
+        barra.style.display = 'flex';
+        barra.style.alignItems = 'center';
+        barra.style.gap = '6px';
+        barra.style.margin = '6px 0';
+        barra.style.fontFamily = 'Arial, sans-serif';
+        barra.className = 'hanna-panel-inline';
 
-    function crearTitulo(texto) {
-        var h = document.createElement('div');
-        h.innerText = texto;
-        h.style.fontWeight = 'bold';
-        h.style.fontSize = '11px';
-        h.style.color = '#0056b3';
-        h.style.textTransform = 'uppercase';
-        h.style.borderBottom = '1px solid #0056b3';
-        h.style.paddingBottom = '2px';
-        h.style.marginTop = '8px';
-        return h;
+        var select = document.createElement('select');
+        select.style.fontSize = '12px';
+        select.style.padding = '4px 6px';
+        select.style.borderRadius = '4px';
+        select.style.border = '1px solid ' + colorBorde;
+        select.style.color = '#495057';
+        select.style.backgroundColor = '#fff';
+        select.style.maxWidth = '360px';
+
+        var optPlaceholder = document.createElement('option');
+        optPlaceholder.textContent = placeholder;
+        optPlaceholder.value = '';
+        optPlaceholder.disabled = true;
+        optPlaceholder.selected = true;
+        select.appendChild(optPlaceholder);
+
+        opciones.forEach(function(grupo) {
+            var og = document.createElement('optgroup');
+            og.label = grupo.categoria;
+            grupo.items.forEach(function(item) {
+                var op = document.createElement('option');
+                op.textContent = item.etiqueta;
+                op.value = item.clave;
+                og.appendChild(op);
+            });
+            select.appendChild(og);
+        });
+
+        select.onchange = function() {
+            var clave = select.value;
+            select.value = ''; // vuelve al placeholder: es un "menú de un solo uso"
+            if (clave) onSeleccionar(clave);
+        };
+
+        barra.appendChild(select);
+        return barra;
     }
 
-    function crearSubtitulo(texto) {
-        var h = document.createElement('div');
-        h.innerText = texto;
-        h.style.fontWeight = 'bold';
-        h.style.fontSize = '10px';
-        h.style.color = '#6c757d';
-        h.style.marginTop = '4px';
-        return h;
+    function anclarAntesDeTabla(inputReferencia, elementoNuevo) {
+        if (!inputReferencia) return false;
+        var contenedor = inputReferencia.closest('table') || inputReferencia.parentElement;
+        if (!contenedor || !contenedor.parentNode) return false;
+        // Evita insertar dos veces si ya está anclado (por ejemplo tras un re-render parcial).
+        if (contenedor.previousElementSibling && contenedor.previousElementSibling.className === 'hanna-panel-inline') {
+            return true;
+        }
+        contenedor.parentNode.insertBefore(elementoNuevo, contenedor);
+        return true;
     }
 
-    function crearFilaConfig(textoBtn, colorBtn, accionLlenar, accionConfig) {
-        var div = document.createElement('div');
-        div.style.display = 'flex';
-        div.style.gap = '4px';
+    var controlesInyectados = { iniciales: false, finales: false, soluciones: false };
 
-        var bMain = document.createElement('button');
-        bMain.innerText = textoBtn;
-        bMain.type = 'button';
-        bMain.style.flex = '1';
-        bMain.style.padding = '5px 8px';
-        bMain.style.backgroundColor = colorBtn;
-        bMain.style.color = '#fff';
-        bMain.style.border = 'none';
-        bMain.style.borderRadius = '4px';
-        bMain.style.cursor = 'pointer';
-        bMain.style.fontSize = '11px';
-        bMain.style.textAlign = 'left';
-        bMain.onclick = accionLlenar;
-
-        div.appendChild(bMain);
-
-        if (accionConfig) {
-            var bCfg = document.createElement('button');
-            bCfg.innerText = '⚙️';
-            bCfg.type = 'button';
-            bCfg.title = 'Abrir el Google Sheet de lotes/vencimientos';
-            bCfg.style.padding = '5px 8px';
-            bCfg.style.backgroundColor = '#6c757d';
-            bCfg.style.color = '#fff';
-            bCfg.style.border = 'none';
-            bCfg.style.borderRadius = '4px';
-            bCfg.style.cursor = 'pointer';
-            bCfg.style.fontSize = '11px';
-            bCfg.onclick = accionConfig;
-            div.appendChild(bCfg);
+    function intentarInyectarControles() {
+        if (!controlesInyectados.iniciales) {
+            var refIni = document.querySelector('input[name^="' + PREFIJO_MEDICIONES_INICIALES + '"]');
+            if (refIni) {
+                var barraIni = crearSelectorInline(opcionesLecturas, '#17a2b8', '🧪 Autocompletar Mediciones Iniciales…', function(clave) {
+                    if (clave === '__borrar__') borrarLecturas();
+                    else llenarLecturas(lecturas[clave]);
+                });
+                if (anclarAntesDeTabla(refIni, barraIni)) controlesInyectados.iniciales = true;
+            }
         }
 
-        return div;
+        if (!controlesInyectados.finales) {
+            var refFin = document.querySelector('input[name^="' + PREFIJO_MEDICIONES_FINALES + '"]');
+            if (refFin) {
+                var barraFin = crearSelectorInline(opcionesLecturas, '#17a2b8', '🧪 Autocompletar Mediciones Finales…', function(clave) {
+                    if (clave === '__borrar__') borrarMedicionesFinales();
+                    else llenarMedicionesFinales(lecturas[clave]);
+                });
+                if (anclarAntesDeTabla(refFin, barraFin)) controlesInyectados.finales = true;
+            }
+        }
+
+        if (!controlesInyectados.soluciones) {
+            var refSol = document.querySelector('input[name^="' + PREFIJO_SOLUCIONES + '"]');
+            if (refSol) {
+                var barraSol = crearSelectorInline(opcionesSoluciones, '#28a745', '🧴 Autocompletar Soluciones Estándar…', function(clave) {
+                    if (clave === '__borrar__') borrarSolucionesSecuencial();
+                    else llenarSolucionesSecuencial(obtenerSoluciones()[clave]);
+                });
+                var btnEditar = document.createElement('button');
+                btnEditar.type = 'button';
+                btnEditar.innerText = '✏️';
+                btnEditar.title = 'Abrir el Google Sheet de lotes/vencimientos';
+                btnEditar.style.padding = '4px 8px';
+                btnEditar.style.fontSize = '12px';
+                btnEditar.style.border = '1px solid #28a745';
+                btnEditar.style.borderRadius = '4px';
+                btnEditar.style.backgroundColor = '#fff';
+                btnEditar.style.cursor = 'pointer';
+                btnEditar.onclick = abrirEditorSheet;
+                barraSol.appendChild(btnEditar);
+
+                if (anclarAntesDeTabla(refSol, barraSol)) controlesInyectados.soluciones = true;
+            }
+        }
+
+        if (controlesInyectados.iniciales && controlesInyectados.finales && controlesInyectados.soluciones && observadorDOM) {
+            observadorDOM.disconnect();
+        }
     }
 
-    function crearBtn(texto, color, accion) {
+    var observadorDOM = new MutationObserver(function() { intentarInyectarControles(); });
+    observadorDOM.observe(document.body, { childList: true, subtree: true });
+
+    // Aviso único en consola (5s tras cargar) para depurar campos que nunca aparecieron.
+    setTimeout(function() {
+        var faltantes = [];
+        if (!controlesInyectados.iniciales) faltantes.push(PREFIJO_MEDICIONES_INICIALES);
+        if (!controlesInyectados.finales) faltantes.push(PREFIJO_MEDICIONES_FINALES);
+        if (!controlesInyectados.soluciones) faltantes.push(PREFIJO_SOLUCIONES);
+        if (faltantes.length > 0) {
+            console.warn('[Panel Hanna] No se encontraron todavía estos campos en la página (puede ser normal si el "Tipo de Informe" aún no se seleccionó): ' + faltantes.join(', '));
+        }
+    }, 5000);
+
+    // ------------------------------------------
+    // INSIGNIA DISCRETA: versión + sincronización de lotes + respaldo
+    // ------------------------------------------
+    var badge = document.createElement('div');
+    badge.style.position = 'fixed';
+    badge.style.bottom = '15px';
+    badge.style.right = '15px';
+    badge.style.zIndex = '99999';
+    badge.style.fontFamily = 'Arial, sans-serif';
+
+    var btnBadge = document.createElement('button');
+    btnBadge.type = 'button';
+    btnBadge.innerText = '⚙️ Hanna v' + APP_VERSION;
+    btnBadge.style.padding = '6px 10px';
+    btnBadge.style.backgroundColor = '#0056b3';
+    btnBadge.style.color = '#fff';
+    btnBadge.style.border = 'none';
+    btnBadge.style.borderRadius = '20px';
+    btnBadge.style.cursor = 'pointer';
+    btnBadge.style.fontSize = '11px';
+    btnBadge.style.fontWeight = 'bold';
+    btnBadge.style.boxShadow = '0 2px 6px rgba(0,0,0,0.25)';
+
+    var miniPanel = document.createElement('div');
+    miniPanel.style.display = 'none';
+    miniPanel.style.flexDirection = 'column';
+    miniPanel.style.gap = '6px';
+    miniPanel.style.marginBottom = '8px';
+    miniPanel.style.backgroundColor = '#f8f9fa';
+    miniPanel.style.padding = '10px';
+    miniPanel.style.borderRadius = '8px';
+    miniPanel.style.boxShadow = '0 6px 16px rgba(0,0,0,0.25)';
+    miniPanel.style.border = '1px solid #dee2e6';
+    miniPanel.style.width = '260px';
+    miniPanel.style.fontSize = '11px';
+
+    var etiquetaSheetSync = document.createElement('div');
+    etiquetaSheetSync.style.color = '#6c757d';
+    miniPanel.appendChild(etiquetaSheetSync);
+
+    function actualizarEtiquetaSheetSync() {
+        if (sheetUltimaActualizacion) {
+            etiquetaSheetSync.innerText = '🔄 Lotes sincronizados: ' + sheetUltimaActualizacion.toLocaleString();
+        } else {
+            etiquetaSheetSync.innerText = '⚠️ Sin datos del Sheet todavía (usando valores por defecto).';
+        }
+    }
+
+    function crearBtnMini(texto, color, accion) {
         var b = document.createElement('button');
-        b.innerText = texto;
         b.type = 'button';
+        b.innerText = texto;
         b.style.padding = '5px 8px';
         b.style.backgroundColor = color;
         b.style.color = '#fff';
@@ -393,142 +565,35 @@
         return b;
     }
 
-    var etiquetaVersion = document.createElement('div');
-    etiquetaVersion.innerText = 'Panel Hanna — versión ' + APP_VERSION;
-    etiquetaVersion.style.fontSize = '10px';
-    etiquetaVersion.style.color = '#6c757d';
-    etiquetaVersion.style.textAlign = 'right';
-    etiquetaVersion.style.marginBottom = '4px';
-    panel.appendChild(etiquetaVersion);
-
-    // ------------------------------------------
-    // SECCIÓN 1. MEDICIONES / LECTURAS
-    // ------------------------------------------
-    panel.appendChild(crearTitulo('1. Lecturas Iniciales'));
-
-    panel.appendChild(crearSubtitulo('── Parámetro: pH ──'));
-    panel.appendChild(crearBtn('🧪 pH / T° (1 Dec)', '#17a2b8', function() { llenarLecturas(lecturas.ph_temp_1dec); }));
-    panel.appendChild(crearBtn('🧪 pH / T° (2 Dec)', '#17a2b8', function() { llenarLecturas(lecturas.ph_temp_2dec); }));
-    panel.appendChild(crearBtn('🧪 pH / mV / T°', '#17a2b8', function() { llenarLecturas(lecturas.ph_mv_temp); }));
-
-    panel.appendChild(crearSubtitulo('── Parámetro: Conductividad ──'));
-    panel.appendChild(crearBtn('⚡ Conductividad (µS/cm)', '#17a2b8', function() { llenarLecturas(lecturas.cond_us); }));
-    panel.appendChild(crearBtn('⚡ Conductividad (mS/cm)', '#17a2b8', function() { llenarLecturas(lecturas.cond_ms); }));
-    panel.appendChild(crearBtn('⚡ Cond. Potenciométrica', '#17a2b8', function() { llenarLecturas(lecturas.cond_potenciometrica); }));
-
-    panel.appendChild(crearSubtitulo('── Parámetro: Oxígeno ──'));
-    panel.appendChild(crearBtn('💧 Oxígeno Disuelto', '#17a2b8', function() { llenarLecturas(lecturas.oxigeno); }));
-
-    panel.appendChild(crearSubtitulo('── Equipos Combinados ──'));
-    panel.appendChild(crearBtn('🔀 pH / Cond (µS) / T° (1 Dec)', '#17a2b8', function() { llenarLecturas(lecturas.ph_cond_us_temp_1dec); }));
-    panel.appendChild(crearBtn('🔀 pH / Cond (µS) / T° (2 Dec)', '#17a2b8', function() { llenarLecturas(lecturas.ph_cond_us_temp_2dec); }));
-    panel.appendChild(crearBtn('🔀 pH / Cond (mS) / T° (1 Dec)', '#17a2b8', function() { llenarLecturas(lecturas.ph_cond_ms_temp_1dec); }));
-    panel.appendChild(crearBtn('🔀 pH / Cond (mS) / T° (2 Dec)', '#17a2b8', function() { llenarLecturas(lecturas.ph_cond_ms_temp_2dec); }));
-    panel.appendChild(crearBtn('🔀 pH / Oxígeno / T°', '#17a2b8', function() { llenarLecturas(lecturas.ph_oxigeno_temp); }));
-    panel.appendChild(crearBtn('📊 Multiparámetro Completo', '#17a2b8', function() { llenarLecturas(lecturas.multi_completo); }));
-
-    panel.appendChild(crearSubtitulo('── Fotometría y Óptica ──'));
-    panel.appendChild(crearBtn('💡 Fotometría (Cloro L, T, pH)', '#17a2b8', function() { llenarLecturas(lecturas.foto_cloro_ph); }));
-    panel.appendChild(crearBtn('💡 Fotometría HI97XX (Cloro Libre)', '#17a2b8', function() { llenarLecturas(lecturas.foto_hi97xx_cloro); }));
-    panel.appendChild(crearBtn('💡 Espectrofotometría', '#17a2b8', function() { llenarLecturas(lecturas.espectrofotometria); }));
-    panel.appendChild(crearBtn('💡 Fotometría de Absorbancia', '#17a2b8', function() { llenarLecturas(lecturas.absorbancia); }));
-
-    panel.appendChild(crearSubtitulo('── Checkers ──'));
-    panel.appendChild(crearBtn('🟩 Checker Cloro Libre', '#17a2b8', function() { llenarLecturas(lecturas.checker_cloro_libre); }));
-    panel.appendChild(crearBtn('🟩 Checker Cloro Total', '#17a2b8', function() { llenarLecturas(lecturas.checker_cloro_total); }));
-    panel.appendChild(crearBtn('🟩 Checker Hierro', '#17a2b8', function() { llenarLecturas(lecturas.checker_hierro); }));
-    panel.appendChild(crearBtn('🟩 Checker Color de Agua', '#17a2b8', function() { llenarLecturas(lecturas.checker_color); }));
-
-    panel.appendChild(crearSubtitulo('── Turbidez ──'));
-    panel.appendChild(crearBtn('🌀 Turbidez HI 93703 (3 Patrones)', '#17a2b8', function() { llenarLecturas(lecturas.turbi_hi93703); }));
-    panel.appendChild(crearBtn('🌀 Turbidez HI 98703', '#17a2b8', function() { llenarLecturas(lecturas.turbi_hi98703); }));
-
-    panel.appendChild(crearBtn('🗑️ Borrar Lecturas', '#dc3545', borrarLecturas));
-
-    // ------------------------------------------
-    // SECCIÓN 2. SOLUCIONES ESTÁNDAR
-    // ------------------------------------------
-    panel.appendChild(crearTitulo('2. Soluciones Estándar'));
-
-    var etiquetaSheetSync = document.createElement('div');
-    etiquetaSheetSync.style.fontSize = '10px';
-    etiquetaSheetSync.style.color = '#6c757d';
-    etiquetaSheetSync.style.marginBottom = '4px';
-    panel.appendChild(etiquetaSheetSync);
-
-    function actualizarEtiquetaSheetSync() {
-        if (sheetUltimaActualizacion) {
-            etiquetaSheetSync.innerText = '🔄 Lotes sincronizados: ' + sheetUltimaActualizacion.toLocaleString();
-        } else {
-            etiquetaSheetSync.innerText = '⚠️ Sin datos del Sheet todavía (usando valores por defecto).';
-        }
-    }
-
-    panel.appendChild(crearBtn('🔄 Recargar lotes del Sheet', '#6c757d', function() {
+    miniPanel.appendChild(crearBtnMini('🔄 Recargar lotes del Sheet', '#6c757d', function() {
         cargarDatosSheet(function(ok) {
             actualizarEtiquetaSheetSync();
             alert(ok ? 'Lotes actualizados desde el Sheet.' : 'No se pudo conectar al Sheet. Se mantienen los últimos datos conocidos.');
         });
     }));
+    miniPanel.appendChild(crearBtnMini('✏️ Abrir Sheet de lotes', '#28a745', abrirEditorSheet));
 
-    panel.appendChild(crearFilaConfig('🧴 Soluciones pH', '#28a745',
-        function() { llenarSolucionesSecuencial(obtenerSoluciones().ph); },
-        abrirEditorSheet
-    ));
+    var nota = document.createElement('div');
+    nota.style.color = '#6c757d';
+    nota.style.marginTop = '2px';
+    nota.innerText = 'Los menús de autocompletar están justo encima de cada tabla del formulario.';
+    miniPanel.appendChild(nota);
 
-    panel.appendChild(crearFilaConfig('🧴 Soluciones Cond (µS/cm)', '#28a745',
-        function() { llenarSolucionesSecuencial(obtenerSoluciones().cond_us); },
-        abrirEditorSheet
-    ));
-
-    panel.appendChild(crearFilaConfig('🧴 Soluciones Cond (mS/cm)', '#28a745',
-        function() { llenarSolucionesSecuencial(obtenerSoluciones().cond_ms); },
-        abrirEditorSheet
-    ));
-
-    panel.appendChild(crearFilaConfig('🧴 Soluciones Cond. Potenciométrica', '#28a745',
-        function() { llenarSolucionesSecuencial(obtenerSoluciones().cond_potenciometrica); },
-        abrirEditorSheet
-    ));
-
-    panel.appendChild(crearFilaConfig('🧴 Soluciones Oxígeno', '#28a745',
-        function() { llenarSolucionesSecuencial(obtenerSoluciones().oxigeno); },
-        abrirEditorSheet
-    ));
-
-    panel.appendChild(crearBtn('🔀 Soluciones pH + Cond (µS/cm)', '#28a745', function() { llenarSolucionesSecuencial(obtenerSoluciones().ph_cond_us); }));
-    panel.appendChild(crearBtn('🔀 Soluciones pH + Cond (mS/cm)', '#28a745', function() { llenarSolucionesSecuencial(obtenerSoluciones().ph_cond_ms); }));
-    panel.appendChild(crearBtn('📊 Soluciones Multiparámetro Completo', '#28a745', function() { llenarSolucionesSecuencial(obtenerSoluciones().multiparametro); }));
-
-    panel.appendChild(crearBtn('🧴 Reactivos Fotometría', '#28a745', function() { llenarSolucionesSecuencial(obtenerSoluciones().fotometria); }));
-    panel.appendChild(crearBtn('🧴 Reactivos Espectrofotometría', '#28a745', function() { llenarSolucionesSecuencial(obtenerSoluciones().espectrofotometria); }));
-    panel.appendChild(crearBtn('🧴 Patrones de Absorbancia', '#28a745', function() { llenarSolucionesSecuencial(obtenerSoluciones().absorbancia); }));
-    panel.appendChild(crearBtn('🧴 Reactivos Checkers', '#28a745', function() { llenarSolucionesSecuencial(obtenerSoluciones().checkers); }));
-
-    panel.appendChild(crearFilaConfig('🌀 Soluciones Turbidez HI 93703', '#28a745',
-        function() { llenarSolucionesSecuencial(obtenerSoluciones().turbi_hi93703); },
-        abrirEditorSheet
-    ));
-
-    panel.appendChild(crearFilaConfig('🌀 Soluciones Turbidez HI 98703', '#28a745',
-        function() { llenarSolucionesSecuencial(obtenerSoluciones().turbi_hi98703); },
-        abrirEditorSheet
-    ));
-
-    panel.appendChild(crearBtn('🗑️ Borrar Soluciones', '#dc3545', borrarSolucionesSecuencial));
-
-    btnPrincipal.onclick = function() {
-        panel.style.display = (panel.style.display === 'none') ? 'flex' : 'none';
+    btnBadge.onclick = function() {
+        miniPanel.style.display = (miniPanel.style.display === 'none') ? 'flex' : 'none';
     };
 
-    contenedor.appendChild(panel);
-    contenedor.appendChild(btnPrincipal);
-    document.body.appendChild(contenedor);
+    badge.appendChild(miniPanel);
+    badge.appendChild(btnBadge);
+    document.body.appendChild(badge);
 
     // Carga inicial de lotes: primero lo que quedó en caché (instantáneo),
     // luego intenta refrescar desde el Sheet en segundo plano.
     cargarCache();
     actualizarEtiquetaSheetSync();
     cargarDatosSheet(actualizarEtiquetaSheetSync);
+
+    // Primer intento de inyección (por si las tablas ya están en el DOM al cargar).
+    intentarInyectarControles();
 
 })();
