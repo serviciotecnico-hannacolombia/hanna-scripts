@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      13.1
+// @version      13.2
 // @description  Panel completo con mediciones, patrones de T° y 3 estándares para turbidez HI93703
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,75 +14,110 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '13.1';
+    var APP_VERSION = '13.2';
 
     var columnasPorFilaLecturas = 3;
 
     // ==========================================
-    // 0. SISTEMA DE GESTIÓN DE LOTES INDIVIDUALES (LOCALSTORAGE)
+    // 0. LOTES Y VENCIMIENTOS DESDE GOOGLE SHEETS
     // ==========================================
+    // La hoja debe tener, en este orden, las columnas: codigo | lote | vencimiento
+    // (con encabezado en la fila 1). El "codigo" debe coincidir exacto con los
+    // códigos usados abajo (HI7004L, HI7031L, etc).
+    //
+    // Cómo obtener las dos URLs de abajo:
+    //  1. SHEET_CSV_URL: en el Sheet -> Archivo -> Compartir -> Publicar en la web
+    //     -> elige la hoja correcta -> formato CSV -> copia el link.
+    //  2. SHEET_EDIT_URL: la URL normal del Sheet (la que usas para editarlo),
+    //     la que abre el botón "✏️ Editar en Sheets" del panel.
+
+    var SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT2t_Y1keodEQiK9Iv4C8PoYmkAe-dFDgVek2z4fAr9IACCV-XDzFvB8jnrBB6J5t4uUwgpwn2W9CSz/pub?gid=0&single=true&output=csv';
+    var SHEET_EDIT_URL = 'https://docs.google.com/spreadsheets/d/1AzJX5B-myRtumple68r7ZXGpE7Xc3nLtkddG5i9rD98/edit?gid=0#gid=0';
+
+    var CACHE_KEY = 'hanna_sheet_cache_v1';
+    var datosSheet = {};       // { "HI7004L": { lote: "2459", venc: "11/2030" }, ... }
+    var sheetUltimaActualizacion = null;
+
+    // Parser CSV simple (soporta campos entre comillas con comas dentro).
+    function parseCSV(texto) {
+        var filas = texto.replace(/\r/g, '').split('\n').filter(function(l) { return l.trim() !== ''; });
+        return filas.slice(1).map(function(linea) { // slice(1) = salta encabezado
+            var campos = [];
+            var actual = '';
+            var dentroComillas = false;
+            for (var i = 0; i < linea.length; i++) {
+                var c = linea[i];
+                if (c === '"') { dentroComillas = !dentroComillas; }
+                else if (c === ',' && !dentroComillas) { campos.push(actual); actual = ''; }
+                else { actual += c; }
+            }
+            campos.push(actual);
+            return campos.map(function(v) { return v.trim(); });
+        });
+    }
+
+    function aplicarFilasSheet(filas) {
+        var nuevo = {};
+        filas.forEach(function(campos) {
+            var codigo = campos[0], lote = campos[1], venc = campos[2];
+            if (codigo) nuevo[codigo] = { lote: lote || '', venc: venc || '' };
+        });
+        datosSheet = nuevo;
+    }
+
+    function guardarCache(texto) {
+        try {
+            localStorage.setItem(CACHE_KEY, texto);
+            localStorage.setItem(CACHE_KEY + '_ts', new Date().toISOString());
+        } catch (e) { /* localStorage no disponible, seguimos sin cache */ }
+    }
+
+    function cargarCache() {
+        try {
+            var texto = localStorage.getItem(CACHE_KEY);
+            var ts = localStorage.getItem(CACHE_KEY + '_ts');
+            if (texto) {
+                aplicarFilasSheet(parseCSV(texto));
+                sheetUltimaActualizacion = ts ? new Date(ts) : null;
+            }
+        } catch (e) { /* nada que cargar */ }
+    }
+
+    function cargarDatosSheet(callback) {
+        if (!SHEET_CSV_URL || SHEET_CSV_URL.indexOf('PEGA_AQUI') === 0) {
+            if (callback) callback(false);
+            return;
+        }
+        fetch(SHEET_CSV_URL, { cache: 'no-store' })
+            .then(function(r) { return r.text(); })
+            .then(function(texto) {
+                aplicarFilasSheet(parseCSV(texto));
+                sheetUltimaActualizacion = new Date();
+                guardarCache(texto);
+                if (callback) callback(true);
+            })
+            .catch(function(err) {
+                console.warn('[Panel Hanna] No se pudo leer el Sheet de lotes, usando último dato conocido / valores por defecto.', err);
+                if (callback) callback(false);
+            });
+    }
 
     function getLote(codigo, defecto) {
-        return localStorage.getItem('hanna_lote_' + codigo) || defecto;
+        return (datosSheet[codigo] && datosSheet[codigo].lote) || defecto;
     }
 
     function getVenc(codigo, defecto) {
-        return localStorage.getItem('hanna_venc_' + codigo) || defecto;
+        return (datosSheet[codigo] && datosSheet[codigo].venc) || defecto;
     }
 
-    function actualizarLotesGrupo(nombreGrupo, items) {
-        alert("Configuración de lotes para: " + nombreGrupo);
-        var cambios = false;
-
-        items.forEach(function(item) {
-            var actualLote = getLote(item.cod, item.loteDef);
-            var actualVenc = getVenc(item.cod, item.vencDef);
-
-            var nuevoLote = prompt("[" + item.cod + "] " + item.nom + "\nIngresa el LOTE actual:", actualLote);
-            if (nuevoLote !== null && nuevoLote.trim() !== "") {
-                localStorage.setItem('hanna_lote_' + item.cod, nuevoLote.trim());
-                cambios = true;
-            }
-
-            var nuevoVenc = prompt("[" + item.cod + "] " + item.nom + "\nIngresa la FECHA DE EXPIRACIÓN (AAAA-MM):", actualVenc);
-            if (nuevoVenc !== null && nuevoVenc.trim() !== "") {
-                localStorage.setItem('hanna_venc_' + item.cod, nuevoVenc.trim());
-                cambios = true;
-            }
-        });
-
-        if (cambios) {
-            alert("¡Lotes y fechas de " + nombreGrupo + " actualizados con éxito!");
-            location.reload();
+    function abrirEditorSheet() {
+        if (!SHEET_EDIT_URL || SHEET_EDIT_URL.indexOf('PEGA_AQUI') === 0) {
+            alert('Todavía no se configuró la URL del Sheet de lotes en el script.');
+            return;
         }
+        window.open(SHEET_EDIT_URL, '_blank');
     }
 
-    // Listas de configuración para actualización por prompt
-    var configpH = [
-        { cod: 'HI7004L', nom: 'Buffer pH 4.01', loteDef: '2459', vencDef: '11/2030' },
-        { cod: 'HI7007L', nom: 'Buffer pH 7.01', loteDef: '2804', vencDef: '01/2031' },
-        { cod: 'HI7010L', nom: 'Buffer pH 10.01', loteDef: '3231', vencDef: '04/2028' }
-    ];
-
-    var configCond = [
-        { cod: 'HI7031L', nom: 'Conductividad 1413 uS/cm', loteDef: '2521', vencDef: '11/2030' },
-        { cod: 'HI7033L', nom: 'Conductividad 84 uS/cm', loteDef: '3448', vencDef: '05/2029' },
-        { cod: 'HI7030L', nom: 'Conductividad 12880 uS/cm', loteDef: '1637', vencDef: '05/2030' }
-    ];
-
-    var configDO = [
-        { cod: 'HI7040L', nom: 'Cero Oxígeno Disuelto', loteDef: 'S0089-24', vencDef: '09/2029' }
-    ];
-
-    var configTurbi93 = [
-        { cod: 'HI93703-0', nom: 'Estándar Turbidez 0 FTU', loteDef: 'T0001', vencDef: '2028-01' },
-        { cod: 'HI93703-10', nom: 'Estándar Turbidez 10 FTU', loteDef: 'T0002', vencDef: '2028-01' },
-        { cod: 'HI93703-50', nom: 'Estándar Turbidez 50 FTU', loteDef: 'T0003', vencDef: '2028-01' }
-    ];
-
-    var configTurbi98 = [
-        { cod: 'HI98703-11', nom: 'Kit Estándares NTU', loteDef: 'T0004', vencDef: '2028-01' }
-    ];
 
     // ==========================================
     // 1. BANCO DE DATOS
@@ -327,7 +362,7 @@
             var bCfg = document.createElement('button');
             bCfg.innerText = '⚙️';
             bCfg.type = 'button';
-            bCfg.title = 'Editar Lotes/Fechas de este grupo';
+            bCfg.title = 'Abrir el Google Sheet de lotes/vencimientos';
             bCfg.style.padding = '5px 8px';
             bCfg.style.backgroundColor = '#6c757d';
             bCfg.style.color = '#fff';
@@ -415,29 +450,50 @@
     // ------------------------------------------
     panel.appendChild(crearTitulo('2. Soluciones Estándar'));
 
+    var etiquetaSheetSync = document.createElement('div');
+    etiquetaSheetSync.style.fontSize = '10px';
+    etiquetaSheetSync.style.color = '#6c757d';
+    etiquetaSheetSync.style.marginBottom = '4px';
+    panel.appendChild(etiquetaSheetSync);
+
+    function actualizarEtiquetaSheetSync() {
+        if (sheetUltimaActualizacion) {
+            etiquetaSheetSync.innerText = '🔄 Lotes sincronizados: ' + sheetUltimaActualizacion.toLocaleString();
+        } else {
+            etiquetaSheetSync.innerText = '⚠️ Sin datos del Sheet todavía (usando valores por defecto).';
+        }
+    }
+
+    panel.appendChild(crearBtn('🔄 Recargar lotes del Sheet', '#6c757d', function() {
+        cargarDatosSheet(function(ok) {
+            actualizarEtiquetaSheetSync();
+            alert(ok ? 'Lotes actualizados desde el Sheet.' : 'No se pudo conectar al Sheet. Se mantienen los últimos datos conocidos.');
+        });
+    }));
+
     panel.appendChild(crearFilaConfig('🧴 Soluciones pH', '#28a745',
         function() { llenarSolucionesSecuencial(obtenerSoluciones().ph); },
-        function() { actualizarLotesGrupo('pH', configpH); }
+        abrirEditorSheet
     ));
 
     panel.appendChild(crearFilaConfig('🧴 Soluciones Cond (µS/cm)', '#28a745',
         function() { llenarSolucionesSecuencial(obtenerSoluciones().cond_us); },
-        function() { actualizarLotesGrupo('Conductividad', configCond); }
+        abrirEditorSheet
     ));
 
     panel.appendChild(crearFilaConfig('🧴 Soluciones Cond (mS/cm)', '#28a745',
         function() { llenarSolucionesSecuencial(obtenerSoluciones().cond_ms); },
-        function() { actualizarLotesGrupo('Conductividad', configCond); }
+        abrirEditorSheet
     ));
 
     panel.appendChild(crearFilaConfig('🧴 Soluciones Cond. Potenciométrica', '#28a745',
         function() { llenarSolucionesSecuencial(obtenerSoluciones().cond_potenciometrica); },
-        function() { actualizarLotesGrupo('Conductividad Potenciométrica', configCond); }
+        abrirEditorSheet
     ));
 
     panel.appendChild(crearFilaConfig('🧴 Soluciones Oxígeno', '#28a745',
         function() { llenarSolucionesSecuencial(obtenerSoluciones().oxigeno); },
-        function() { actualizarLotesGrupo('Oxígeno Disuelto', configDO); }
+        abrirEditorSheet
     ));
 
     panel.appendChild(crearBtn('🔀 Soluciones pH + Cond (µS/cm)', '#28a745', function() { llenarSolucionesSecuencial(obtenerSoluciones().ph_cond_us); }));
@@ -451,12 +507,12 @@
 
     panel.appendChild(crearFilaConfig('🌀 Soluciones Turbidez HI 93703', '#28a745',
         function() { llenarSolucionesSecuencial(obtenerSoluciones().turbi_hi93703); },
-        function() { actualizarLotesGrupo('Turbidez HI 93703', configTurbi93); }
+        abrirEditorSheet
     ));
 
     panel.appendChild(crearFilaConfig('🌀 Soluciones Turbidez HI 98703', '#28a745',
         function() { llenarSolucionesSecuencial(obtenerSoluciones().turbi_hi98703); },
-        function() { actualizarLotesGrupo('Turbidez HI 98703', configTurbi98); }
+        abrirEditorSheet
     ));
 
     panel.appendChild(crearBtn('🗑️ Borrar Soluciones', '#dc3545', borrarSolucionesSecuencial));
@@ -468,5 +524,11 @@
     contenedor.appendChild(panel);
     contenedor.appendChild(btnPrincipal);
     document.body.appendChild(contenedor);
+
+    // Carga inicial de lotes: primero lo que quedó en caché (instantáneo),
+    // luego intenta refrescar desde el Sheet en segundo plano.
+    cargarCache();
+    actualizarEtiquetaSheetSync();
+    cargarDatosSheet(actualizarEtiquetaSheetSync);
 
 })();
