@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         QR Órdenes de Trabajo - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      2.5.0
-// @description  QR con ID-MM-AAAA|NIT|NOMBRE|EMAIL del cliente codificados. Un solo canvas 100x100px, mes y año como texto debajo.
+// @version      2.6.0
+// @description  QR con ID-MM-AAAA|NIT|NOMBRE|EMAIL del cliente codificados. Un solo canvas 100x100px, mes y año como texto debajo. Incluye botón para copiar el texto codificado al portapapeles.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
 // @grant        none
@@ -219,6 +219,21 @@
         text-align : center;
         word-break : break-word;
       }
+      #${CONFIG.containerId} .ot-copy-btn {
+        width         : 100%;
+        font-size     : 10px;
+        font-weight   : 600;
+        color         : #fff;
+        background    : #2b7cd3;
+        border        : none;
+        border-radius : 5px;
+        padding       : 5px 0;
+        cursor        : pointer;
+        margin-top    : 2px;
+      }
+      #${CONFIG.containerId} .ot-copy-btn:hover {
+        background: #1f5fa3;
+      }
 
       @media print {
         #${CONFIG.containerId} { display: none !important; }
@@ -271,6 +286,39 @@
   }
 
   // ─────────────────────────────────────────────
+  // 6b. COPIAR AL PORTAPAPELES
+  // Copia el texto crudo codificado en el QR (mismo formato que ve el
+  // lector de QR al escanearlo), no una imagen.
+  // ─────────────────────────────────────────────
+  function copiarAlPortapapeles(texto, onResultado) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(texto).then(
+        () => onResultado(true),
+        () => copiarConFallback(texto, onResultado)
+      );
+    } else {
+      copiarConFallback(texto, onResultado);
+    }
+  }
+
+  function copiarConFallback(texto, onResultado) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = texto;
+      ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      onResultado(ok);
+    } catch (e) {
+      console.error('[OT QR] No se pudo copiar al portapapeles:', e);
+      onResultado(false);
+    }
+  }
+
+  // ─────────────────────────────────────────────
   // 7. DIBUJAR QR EN CANVAS (sin duplicados)
   // ─────────────────────────────────────────────
   function drawQRToCanvas(targetCanvas, qrValue, size) {
@@ -299,7 +347,7 @@
   // ─────────────────────────────────────────────
   // 8. CONSTRUIR DOM
   // ─────────────────────────────────────────────
-  function buildContainers(orderId, dateInfo, nit) {
+  function buildContainers(orderId, dateInfo, nit, qrValue) {
     const monthText = dateInfo ? `${dateInfo.mesNombre} ${dateInfo.anio}` : null;
 
     // ── Pantalla ──
@@ -328,6 +376,20 @@
       n.textContent = `NIT ${nit}`;
       wrap.appendChild(n);
     }
+
+    const btnCopiar = document.createElement('button');
+    btnCopiar.type        = 'button';
+    btnCopiar.className   = 'ot-copy-btn';
+    btnCopiar.textContent = 'Copiar';
+    btnCopiar.addEventListener('click', () => {
+      copiarAlPortapapeles(qrValue, (ok) => {
+        const original = 'Copiar';
+        btnCopiar.textContent = ok ? '✓ Copiado' : 'Error';
+        setTimeout(() => { btnCopiar.textContent = original; }, 1500);
+      });
+    });
+    wrap.appendChild(btnCopiar);
+
     document.body.appendChild(wrap);
 
     // ── Impresión ──
@@ -392,7 +454,7 @@
       const contacto       = getContactoData();
       const qrValue        = buildQRValue(orderId, dateInfo, clienteEmpresa, contacto);
       injectStyles();
-      const { canvas, printCanvas } = buildContainers(orderId, dateInfo, clienteEmpresa.nit);
+      const { canvas, printCanvas } = buildContainers(orderId, dateInfo, clienteEmpresa.nit, qrValue);
       loadAndRender(qrValue, canvas, printCanvas);
     };
 

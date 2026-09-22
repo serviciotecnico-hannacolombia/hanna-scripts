@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         QR Pedidos SGP - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      2.1.0
-// @description  QR (SVG vectorial) con RUT, Cotización, Orden de Compra, OTST, Remisión y Factura. Solo se genera si hay Remisión o Factura. Botones de descarga en SVG y PNG.
+// @version      2.2.0
+// @description  QR (SVG vectorial) con RUT, Cotización, Orden de Compra, OTST, Remisión y Factura. Solo se genera si hay Remisión o Factura. Botones de descarga en SVG y PNG, y de copiar el texto codificado.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/sgp/item/*
 // @grant        none
@@ -250,6 +250,39 @@
     downloadBlob(blob, filename);
   }
 
+  // ─────────────────────────────────────────────
+  // 6b. COPIAR AL PORTAPAPELES
+  // Copia el texto crudo codificado en el QR (mismo formato que ve el
+  // lector de QR al escanearlo), no una imagen.
+  // ─────────────────────────────────────────────
+  function copiarAlPortapapeles(texto, onResultado) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(texto).then(
+        () => onResultado(true),
+        () => copiarConFallback(texto, onResultado)
+      );
+    } else {
+      copiarConFallback(texto, onResultado);
+    }
+  }
+
+  function copiarConFallback(texto, onResultado) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = texto;
+      ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      onResultado(ok);
+    } catch (e) {
+      console.error('[SGP QR] No se pudo copiar al portapapeles:', e);
+      onResultado(false);
+    }
+  }
+
   function downloadPng(svgEl, filename, size) {
     const serialized = new XMLSerializer().serializeToString(svgEl);
     const svgBlob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
@@ -279,7 +312,7 @@
   // ─────────────────────────────────────────────
   // 7. CONSTRUIR DOM
   // ─────────────────────────────────────────────
-  function buildContainer(orderId, data, qr) {
+  function buildContainer(orderId, data, qr, qrValue) {
     const wrap = document.createElement('div');
     wrap.id = CONFIG.containerId;
 
@@ -330,8 +363,21 @@
       downloadPng(svgEl, `QR-pedido-${orderId}.png`, CONFIG.pngExportSize);
     });
 
+    const btnCopiar = document.createElement('button');
+    btnCopiar.type        = 'button';
+    btnCopiar.className   = 'sgp-download-btn';
+    btnCopiar.textContent = 'Copiar';
+    btnCopiar.addEventListener('click', () => {
+      copiarAlPortapapeles(qrValue, (ok) => {
+        const original = 'Copiar';
+        btnCopiar.textContent = ok ? '✓ Copiado' : 'Error';
+        setTimeout(() => { btnCopiar.textContent = original; }, 1500);
+      });
+    });
+
     row.appendChild(btnSvg);
     row.appendChild(btnPng);
+    row.appendChild(btnCopiar);
     wrap.appendChild(row);
 
     document.body.appendChild(wrap);
@@ -345,7 +391,7 @@
       const qr = makeQR(qrValue);
       if (!qr) return;
       injectStyles();
-      buildContainer(orderId, data, qr);
+      buildContainer(orderId, data, qr, qrValue);
     };
     if (typeof qrcode !== 'undefined') { render(); return; }
     const s = document.createElement('script');
