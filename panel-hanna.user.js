@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      14.0
+// @version      14.1
 // @description  Panel completo con mediciones, patrones de T° y menú de Soluciones Estándar 100% dinámico desde Google Sheets (agrupado por parámetro)
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '14.0';
+    var APP_VERSION = '14.1';
 
     var columnasPorFilaLecturas = 3;
 
@@ -48,22 +48,50 @@
     var datosSheet = [];
     var sheetUltimaActualizacion = null;
 
-    // Parser CSV simple (soporta campos entre comillas con comas dentro).
+    // Parser CSV (soporta campos entre comillas con comas Y saltos de línea
+    // dentro, y comillas escapadas "" dentro de un campo). A diferencia de la
+    // versión anterior, NO corta el texto por saltos de línea antes de mirar
+    // las comillas: si una celda de Google Sheets tiene un salto de línea
+    // interno (ej. una descripción en 2 líneas), ese salto queda DENTRO del
+    // mismo campo en vez de partir la fila en dos (lo que antes generaba una
+    // fila fantasma en el grupo "Sin parámetro").
     function parseCSV(texto) {
-        var filas = texto.replace(/\r/g, '').split('\n').filter(function(l) { return l.trim() !== ''; });
-        return filas.slice(1).map(function(linea) { // slice(1) = salta encabezado
-            var campos = [];
-            var actual = '';
-            var dentroComillas = false;
-            for (var i = 0; i < linea.length; i++) {
-                var c = linea[i];
-                if (c === '"') { dentroComillas = !dentroComillas; }
-                else if (c === ',' && !dentroComillas) { campos.push(actual); actual = ''; }
-                else { actual += c; }
+        var filas = [];
+        var actual = [];
+        var campo = '';
+        var dentroComillas = false;
+        var limpio = texto.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+        for (var i = 0; i < limpio.length; i++) {
+            var c = limpio[i];
+            if (dentroComillas) {
+                if (c === '"') {
+                    if (limpio[i + 1] === '"') { campo += '"'; i++; } // comilla escapada ""
+                    else { dentroComillas = false; }
+                } else {
+                    campo += c;
+                }
+            } else if (c === '"') {
+                dentroComillas = true;
+            } else if (c === ',') {
+                actual.push(campo); campo = '';
+            } else if (c === '\n') {
+                actual.push(campo); campo = '';
+                filas.push(actual); actual = [];
+            } else {
+                campo += c;
             }
-            campos.push(actual);
-            return campos.map(function(v) { return v.trim(); });
-        });
+        }
+        if (campo !== '' || actual.length > 0) { actual.push(campo); filas.push(actual); }
+
+        return filas.slice(1) // salta encabezado
+            .map(function(campos) {
+                // Un salto de línea que sobrevivió dentro de un campo (ej. una
+                // descripción en 2 líneas) se convierte en un espacio, para no
+                // meter saltos de línea crudos en los <input> del formulario.
+                return campos.map(function(v) { return v.replace(/\s*\n\s*/g, ' ').trim(); });
+            })
+            .filter(function(campos) { return campos.some(function(v) { return v !== ''; }); });
     }
 
     function aplicarFilasSheet(filas) {
@@ -231,9 +259,19 @@
     // solución a la vez, en vez de un combo prearmado en el código.
     var COLUMNAS_POR_SOLUCION = 4; // código, lote, vencimiento, descripción
 
-    function agregarSolucionSecuencial(datosFila) {
+    function obtenerInputsSoluciones() {
         var inputs = document.querySelectorAll('input[name^="' + PREFIJO_SOLUCIONES + '"], table input[name*="soluciones"]');
         if (inputs.length === 0) inputs = document.querySelectorAll('input[type="text"]');
+        return inputs;
+    }
+
+    function dispararEventos(input) {
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function agregarSolucionSecuencial(datosFila) {
+        var inputs = obtenerInputsSoluciones();
         if (inputs.length === 0) return alert('No se encontraron campos de soluciones.');
 
         var totalFilas = Math.floor(inputs.length / COLUMNAS_POR_SOLUCION);
@@ -242,21 +280,84 @@
             if (!inputs[base].value) {
                 for (var c = 0; c < COLUMNAS_POR_SOLUCION && c < datosFila.length; c++) {
                     inputs[base + c].value = datosFila[c];
-                    inputs[base + c].dispatchEvent(new Event('input', { bubbles: true }));
-                    inputs[base + c].dispatchEvent(new Event('change', { bubbles: true }));
+                    dispararEventos(inputs[base + c]);
                 }
                 return;
             }
         }
-        alert('Ya no hay espacio libre en la tabla de Soluciones Estándar. Borra alguna fila (🗑️) antes de agregar otra.');
+        alert('Ya no hay espacio libre en la tabla de Soluciones Estándar. Borra alguna fila antes de agregar otra.');
     }
 
     function borrarSolucionesSecuencial() {
-        var inputs = document.querySelectorAll('input[name^="' + PREFIJO_SOLUCIONES + '"], table input[name*="soluciones"]');
+        var inputs = obtenerInputsSoluciones();
         for (var i = 0; i < inputs.length; i++) {
             inputs[i].value = '';
-            inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-            inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
+            dispararEventos(inputs[i]);
+        }
+    }
+
+    // Borra solo los 4 campos de UNA fila (código, lote, vencimiento,
+    // descripción), identificada por el índice de su primer campo.
+    function borrarFilaSolucion(base) {
+        var inputs = obtenerInputsSoluciones();
+        for (var c = 0; c < COLUMNAS_POR_SOLUCION; c++) {
+            if (inputs[base + c]) {
+                inputs[base + c].value = '';
+                dispararEventos(inputs[base + c]);
+            }
+        }
+    }
+
+    // Agrega, junto a cada fila de la tabla de Soluciones Estándar que tenga
+    // al menos un campo lleno, un pequeño botón "✖" para borrar solo esa
+    // fila. El botón aparece/desaparece solo según si la fila tiene datos
+    // (ya sea porque el técnico la llenó a mano o por el menú de arriba).
+    function inyectarBotonesLimpiarFila() {
+        var inputs = obtenerInputsSoluciones();
+        var totalFilas = Math.floor(inputs.length / COLUMNAS_POR_SOLUCION);
+
+        for (var fila = 0; fila < totalFilas; fila++) {
+            var base = fila * COLUMNAS_POR_SOLUCION;
+            var inputsFila = [];
+            for (var c = 0; c < COLUMNAS_POR_SOLUCION; c++) inputsFila.push(inputs[base + c]);
+
+            var ultimoInput = inputsFila[COLUMNAS_POR_SOLUCION - 1];
+            if (!ultimoInput || ultimoInput.dataset.hannaBotonFila) continue; // ya tiene botón
+            ultimoInput.dataset.hannaBotonFila = '1';
+
+            (function(baseFila, inputsFila) {
+                var boton = document.createElement('button');
+                boton.type = 'button';
+                boton.innerText = '✖';
+                boton.title = 'Borrar esta fila de Soluciones Estándar';
+                boton.style.marginLeft = '6px';
+                boton.style.padding = '2px 7px';
+                boton.style.fontSize = '11px';
+                boton.style.lineHeight = '1.4';
+                boton.style.border = '1px solid #dc3545';
+                boton.style.borderRadius = '4px';
+                boton.style.backgroundColor = '#fff';
+                boton.style.color = '#dc3545';
+                boton.style.cursor = 'pointer';
+                boton.style.display = 'none';
+
+                function actualizarVisibilidad() {
+                    var tieneDatos = inputsFila.some(function(inp) { return inp.value.trim() !== ''; });
+                    boton.style.display = tieneDatos ? 'inline-block' : 'none';
+                }
+
+                boton.onclick = function() {
+                    borrarFilaSolucion(baseFila);
+                    actualizarVisibilidad();
+                };
+
+                inputsFila.forEach(function(inp) {
+                    inp.addEventListener('input', actualizarVisibilidad);
+                });
+
+                ultimoInput.insertAdjacentElement('afterend', boton);
+                actualizarVisibilidad();
+            })(base, inputsFila);
         }
     }
 
@@ -388,9 +489,19 @@
     // Vacía y vuelve a llenar los <optgroup>/<option> de un <select> ya creado,
     // dejando intacta la opción placeholder (la primera). Se usa tanto al
     // crear el selector como para refrescarlo cuando cambian los datos del
-    // Sheet (recarga inicial o botón "🔄 Recargar lotes del Sheet").
+    // Sheet (recarga inicial o botón "🔄 Recargar soluciones del Sheet").
+    //
+    // OJO: select.remove(indice) solo quita el <option> pero no borra el
+    // <optgroup> que lo contenía, así que un simple bucle sobre select.remove
+    // deja los <optgroup> anteriores vacíos (huérfanos) en el DOM — eso hacía
+    // que el menú mostrara los nombres de los grupos duplicados y vacíos tras
+    // cada refresco. En vez de eso, quitamos directamente todos los hijos del
+    // <select> salvo la opción placeholder.
     function poblarOpcionesEnSelect(select, opciones) {
-        while (select.options.length > 1) select.remove(1);
+        var placeholder = select.options[0];
+        while (select.firstChild) select.removeChild(select.firstChild);
+        select.appendChild(placeholder);
+
         opciones.forEach(function(grupo) {
             var og = document.createElement('optgroup');
             og.label = grupo.categoria;
@@ -464,7 +575,10 @@
                 barraSol.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Soluciones Estándar', '#28a745', borrarSolucionesSecuencial));
                 barraSol.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de lotes/vencimientos', '#28a745', abrirEditorSheet));
 
-                if (anclarAntesDeTabla(refSol, barraSol)) controlesInyectados.soluciones = true;
+                if (anclarAntesDeTabla(refSol, barraSol)) {
+                    controlesInyectados.soluciones = true;
+                    inyectarBotonesLimpiarFila();
+                }
             }
         }
 
