@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      14.2
-// @description  Panel completo con mediciones, patrones de T° y menú de Soluciones Estándar 100% dinámico desde Google Sheets (agrupado por parámetro)
+// @version      15.0
+// @description  Panel completo con Mediciones (Iniciales/Finales) y Soluciones Estándar 100% dinámicas desde Google Sheets, con paneles de checkboxes agrupados
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
 // @grant        none
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '14.2';
+    var APP_VERSION = '15.0';
 
     var columnasPorFilaLecturas = 3;
 
@@ -156,58 +156,86 @@
         window.open(SHEET_EDIT_URL, '_blank');
     }
 
+    // ==========================================
+    // 0b. MEDICIONES (LECTURAS) DESDE GOOGLE SHEETS (100% dinámico)
+    // ==========================================
+    // Misma idea que las Soluciones Estándar, pero para "Mediciones Iniciales"
+    // y "Mediciones Finales". Es una pestaña NUEVA ("lecturas") dentro del
+    // MISMO Google Sheet, con estas columnas exactas, en este orden, con
+    // encabezado en la fila 1:
+    //   categoria | etiqueta | valor | ayuda | tolerancia
+    // Cada fila es UN punto de lectura individual (no una "receta" completa
+    // como antes). El técnico marca en el panel los puntos que usó y se van
+    // acumulando en la primera fila vacía de la tabla — igual que Soluciones.
+
+    var SHEET_LECTURAS_CSV_URL = 'PEGA_AQUI_URL_CSV_LECTURAS';
+    var CACHE_KEY_LECTURAS = 'hanna_sheet_cache_lecturas_v1';
+    // [{ categoria: "pH", etiqueta: "7.01 pH (2 decimales)", valor: "7.01 pH", ayuda: "...", tolerancia: "±0.05 pH" }, ...]
+    var datosLecturas = [];
+    var sheetLecturasUltimaActualizacion = null;
+
+    function aplicarFilasLecturas(filas) {
+        var nuevo = [];
+        filas.forEach(function(campos) {
+            var categoria = (campos[0] || '').trim();
+            var etiqueta = campos[1], valor = campos[2], ayuda = campos[3], tolerancia = campos[4];
+            if (!etiqueta && !valor) return; // fila vacía: se ignora
+            nuevo.push({
+                categoria: categoria || 'Sin categoría',
+                etiqueta: etiqueta || (valor || ''),
+                valor: valor || '',
+                ayuda: ayuda || '',
+                tolerancia: tolerancia || ''
+            });
+        });
+        datosLecturas = nuevo;
+    }
+
+    function guardarCacheLecturas(texto) {
+        try {
+            localStorage.setItem(CACHE_KEY_LECTURAS, texto);
+            localStorage.setItem(CACHE_KEY_LECTURAS + '_ts', new Date().toISOString());
+        } catch (e) { /* localStorage no disponible, seguimos sin cache */ }
+    }
+
+    function cargarCacheLecturas() {
+        try {
+            var texto = localStorage.getItem(CACHE_KEY_LECTURAS);
+            var ts = localStorage.getItem(CACHE_KEY_LECTURAS + '_ts');
+            if (texto) {
+                aplicarFilasLecturas(parseCSV(texto));
+                sheetLecturasUltimaActualizacion = ts ? new Date(ts) : null;
+            }
+        } catch (e) { /* nada que cargar */ }
+    }
+
+    function cargarDatosLecturas(callback) {
+        if (!SHEET_LECTURAS_CSV_URL || SHEET_LECTURAS_CSV_URL.indexOf('PEGA_AQUI') === 0) {
+            if (callback) callback(false);
+            return;
+        }
+        fetch(SHEET_LECTURAS_CSV_URL, { cache: 'no-store' })
+            .then(function(r) { return r.text(); })
+            .then(function(texto) {
+                aplicarFilasLecturas(parseCSV(texto));
+                sheetLecturasUltimaActualizacion = new Date();
+                guardarCacheLecturas(texto);
+                if (callback) callback(true);
+            })
+            .catch(function(err) {
+                console.warn('[Panel Hanna] No se pudo leer el Sheet de lecturas, usando último dato conocido / caché.', err);
+                if (callback) callback(false);
+            });
+    }
+
 
     // ==========================================
     // 1. BANCO DE DATOS
     // ==========================================
-
-      var lecturas = {
-        // pH solo
-        ph_temp_1dec: ["7.0 pH", "7.0 ± 0.1 pH @25°C", "±0.2 pH", "4.0 pH", "4.0 ± 0.1 pH @25°C", "±0.2 pH", "10.0 pH", "10.0 ± 0.1 pH @25°C", "±0.2 pH", "25.0°C", "25.0 °C", "±0.7 °C"],
-        ph_temp_2dec: ["7.01 pH", "7.01 ± 0.01 pH @25°C", "±0.05 pH", "4.01 pH", "4.01 ± 0.01 pH @25°C", "±0.05 pH", "10.01 pH", "10.01 ± 0.01 pH @25°C", "±0.05 pH", "25.0°C", "25.0 °C", "±0.7 °C"],
-        ph_mv_temp: ["7.01 pH(0.0mV)", "7.01 pH @25°C (0±30mV )", "±30mV", "4.01 pH(177.4mV)", "4.01 pH @25°C (177.48mV )", "85% a 105%", "10.01 pH(-177.4mV)", "10.01 pH @25°C (-177.48mV )", "85% a 105%", "25.0°C", "25.0 °C", "±0.7 °C"],
-
-        // Conductividad solo
-        cond_us: ["0 uS/cm", "0 uS/cm @25°C", "±2.0% F.S","1413 uS/cm", "1413±5 uS/cm @25°C", "±2.0% F.S", "25.0°C", "25.0 °C", "±0.7 °C"],
-        cond_ms: ["0 mS/cm", "0 mS/cm @25°C", "±2.0% F.S","12.88 mS/cm", "12880±50 uS/cm @25°C", "±2.0% F.S", "25.0°C", "25.0 °C", "±0.7 °C"],
-        cond_potenciometrica: ["0 uS/cm", "0 uS/cm @25°C", "±2 de la lectura o lo que sea mayor.","1413 uS/cm", "1413±5 uS/cm @25°C","±2 de la lectura o lo que sea mayor.","12.88 mS/cm", "12880±50 uS/cm @25°C", "±2 de la lectura o lo que sea mayor.", "25.0°C", "25.0 °C", "±0.7 °C"],
-
-        // Oxígeno solo
-        oxigeno: ["0.0 % OD", "0% ± 0.1 OD @25°C", "<10 % OD","100 % OD", "100% OD @25°C", "90-120 % OD", "25.0°C", "25.0 °C", "±0.7 °C"],
-
-        // Combinados pH + Conductividad (uS/cm)
-        ph_cond_us_temp_1dec: ["7.0 pH", "7.0 ± 0.1 pH @25°C", "±0.2 pH", "4.0 pH", "4.0 ± 0.1 pH @25°C", "±0.2 pH", "10.0 pH", "10.0 ± 0.1 pH @25°C", "±0.2 pH","0 uS/cm", "0 uS/cm @25°C", "±2.0% F.S","1413 uS/cm", "1413±5 uS/cm @25°C", "±2.0% F.S", "25.0°C", "25.0 °C", "±0.7 °C"],
-        ph_cond_us_temp_2dec: ["7.01 pH", "7.01 ± 0.01 pH @25°C", "±0.05 pH", "4.01 pH", "4.01 ± 0.01 pH @25°C", "±0.05 pH", "10.01 pH", "10.01 ± 0.01 pH @25°C", "±0.05 pH","0 uS/cm", "0 uS/cm @25°C", "±2.0% F.S","1413 uS/cm", "1413±5 uS/cm @25°C", "±2.0% F.S", "25.0°C", "25.0 °C", "±0.7 °C"],
-
-        // Combinados pH + Conductividad (mS/cm)
-        ph_cond_ms_temp_1dec: ["7.0 pH", "7.0 ± 0.1 pH @25°C", "±0.2 pH", "4.0 pH", "4.0 ± 0.1 pH @25°C", "±0.2 pH", "10.0 pH", "10.0 ± 0.1 pH @25°C", "±0.2 pH","0 mS/cm", "0 mS/cm @25°C", "±2.0% F.S","12.88 mS/cm", "12880±50 uS/cm @25°C", "±2.0% F.S", "25.0°C", "25.0 °C", "±0.7 °C"],
-        ph_cond_ms_temp_2dec: ["7.01 pH", "7.01 ± 0.01 pH @25°C", "±0.05 pH", "4.01 pH", "4.01 ± 0.01 pH @25°C", "±0.05 pH", "10.01 pH", "10.01 ± 0.01 pH @25°C", "±0.05 pH","0 mS/cm", "0 mS/cm @25°C", "±2.0% F.S","12.88 mS/cm", "12880±50 uS/cm @25°C", "±2.0% F.S", "25.0°C", "25.0 °C", "±0.7 °C"],
-
-        // Combinados pH + Oxígeno
-        ph_oxigeno_temp: ["7.01 pH(0.0mV)", "7.01 pH @25°C (0±30mV )", "±30mV", "4.01 pH(177.4mV)", "4.01 pH @25°C (177.48mV )", "85% a 105%", "10.01 pH(-177.4mV)", "10.01 pH @25°C (-177.48mV )", "85% a 105%","0.0 % OD", "0% ± 0.1 OD @25°C", "<10 % OD","100 % OD", "100% OD @25°C", "90-120 % OD", "25.0°C", "25.0 °C", "±0.7 °C"],
-
-        // Multiparámetros
-        multi_completo: ["7.01 pH(0.0mV)", "7.01 pH @25°C (0±30mV )", "±30mV", "4.01 pH(177.4mV)", "4.01 pH @25°C (177.48mV )", "85% a 105%", "10.01 pH(-177.4mV)", "10.01 pH @25°C (-177.48mV )", "85% a 105%","0.0 % OD", "0% ± 0.1 OD @25°C", "<10 % OD","100 % OD", "100% OD @25°C", "90-120 % OD","0 uS/cm", "0 uS/cm @25°C", "±2 de la lectura o lo que sea mayor.","1413 uS/cm", "1413±5 uS/cm @25°C","±2 de la lectura o lo que sea mayor.","12.88 mS/cm", "12880±50 uS/cm @25°C", "±2 de la lectura o lo que sea mayor.", "25.0°C", "25.0 °C", "±0.7 °C"],
-
-        // Fotometría, Espectrofotometría y Absorbancia
-        foto_cloro_ph: ["7.0 pH", "7.0 pH", "±0.2 pH","1.01 mg/L", "1.00 ± 0.03mg/L CL2 F @25°C", "±0.03 mg/L ±3% de lectura","1.01 mg/L", "1.00 ± 0.03mg/L CL2 T @25°C", "±0.03 mg/L ±3% de lectura "],
-        foto_hi97xx_cloro: ["0.0 mg/L", "0 ± CL2 F @25°C", "±0.03 mg/L ±3% de lectura","1.01 mg/L", "1.00 ± 0.03mg/L CL2 F @25°C", "±0.03 mg/L ±3% de lectura"],
-        espectrofotometria: ["361.1nm", "359.6 a 362.6 abs ±1.5 nm", "359.6 a 362.6 abs ±1.5 nm", "446.2nm", "444.7 a 447.7 abs ±1.5 nm", "444.7 a 447.7 abs ±1.5 nm","536.5nm","535.0 a 538.0 abs ±1.5 nm","535.0 a 538.0 abs ±1.5 nm","637.5nm","636.0 a 639.0 abs ±1.5 nm","636.0 a 639.0 abs ±1.5 nm" ],
-        absorbancia: ["1.00 abs", "420nm   1.00 abs", "± 0.02 @25°C + 0.003 abs","1.00 abs", "466nm   1.00 abs", "± 0.02 @25°C + 0.003 abs","1.00 abs", "525nm   1.00 abs", "± 0.02 @25°C + 0.003 abs","1.00 abs", "575nm   1.00 abs", "± 0.02 @25°C + 0.003 abs","1.00 abs", "610nm   1.00 abs", "± 0.02 @25°C + 0.003 abs"],
-
-        // Checkers Separados
-        checker_cloro_libre: ["0.00 ppm", "0.00 ppm @25°C","±0.03 ppm ±3% de lectura","1.00 ppm", "1.00 ±0.05 ppm @25°C","±0.03 ppm ±3% de lectura"],
-        checker_cloro_total: ["1.50 ppm", "OK"],
-        checker_hierro: ["0.00 ppm", "0.00 ppm @25°C","±0.03 ppm ±3% de lectura","1.00 ppm", "1.00 ±0.05 ppm @25°C","±0.03 ppm ±3% de lectura"],
-        checker_color: ["0.00 PCU", "0.00 PCU @25°C","±10 PCU±5% de lectura","155 PCU", "150 ±15 PCU @25°C","±10 PCU±5% de lectura "],
-
-        // Turbidez
-        turbi_hi93703: ["0.0 FTU", "0.0 FTU @25°C < 0.1", "±5%  F.S. (0 a 10 FTU)","10.00 FTU", "10.00 FTU @25°C ± 0.20 ", "±10% F.S. (10 a 50 FTU)","501 FTU", "500 FTU @25°C ± 10", "±5%  F.S. (50 a 1000 FTU)"],
-        turbi_hi98703: ["0.10 NTU", "0.10 NTU@25°C", "±2% o 0.02 NTU lo que sea >","15.0 NTU", "15.0 NTU@25°C", "±2% o 0.02 NTU lo que sea >","100 NTU", "100 NTU@25°C", "±2% o 0.02 NTU lo que sea >","750 NTU", "750 NTU@25°C", "±2% o 0.02 NTU lo que sea >"]
-    };
-
-    // Las "Soluciones Estándar" ya NO se definen aquí: se construyen en vivo
-    // desde datosSheet (ver Sección 3, construirOpcionesSolucionesDesdeSheet()).
+    // Tanto las "Soluciones Estándar" como las "Mediciones Iniciales/Finales"
+    // ya NO se definen aquí: se construyen en vivo desde datosSheet y
+    // datosLecturas (ver Sección 3, construirOpcionesSolucionesDesdeSheet()
+    // y construirOpcionesLecturasDesdeSheet()).
 
     // ==========================================
     // 2. FUNCIONES DE AUTOMATIZACIÓN
@@ -222,23 +250,6 @@
     var PREFIJO_MEDICIONES_INICIALES = 'mediciones_iniciales';
     var PREFIJO_SOLUCIONES = 'soluciones_codigo';
 
-    function llenarTablaMediciones(prefijoNombre, matrizDatos) {
-        var inputs = document.querySelectorAll('input[name^="' + prefijoNombre + '"]');
-        if (inputs.length === 0) {
-            alert('No se encontraron campos para "' + prefijoNombre + '". Puede que el nombre real del campo en la página sea distinto — revísalo con Inspeccionar elemento y avísale a Brayan.');
-            return;
-        }
-        var inicio = columnasPorFilaLecturas;
-        for (var i = inicio; i < inputs.length; i++) {
-            var idx = i - inicio;
-            if (idx < matrizDatos.length) {
-                inputs[i].value = matrizDatos[idx];
-                inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-                inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }
-    }
-
     function borrarTablaMediciones(prefijoNombre) {
         var inputs = document.querySelectorAll('input[name^="' + prefijoNombre + '"]');
         for (var i = columnasPorFilaLecturas; i < inputs.length; i++) {
@@ -248,10 +259,99 @@
         }
     }
 
-    function llenarLecturas(matrizDatos) { llenarTablaMediciones(PREFIJO_MEDICIONES_INICIALES, matrizDatos); }
     function borrarLecturas() { borrarTablaMediciones(PREFIJO_MEDICIONES_INICIALES); }
-    function llenarMedicionesFinales(matrizDatos) { llenarTablaMediciones(PREFIJO_MEDICIONES_FINALES, matrizDatos); }
     function borrarMedicionesFinales() { borrarTablaMediciones(PREFIJO_MEDICIONES_FINALES); }
+
+    // Agrega UNA lectura (valor, ayuda, tolerancia) en la primera fila vacía
+    // de la tabla de Mediciones indicada, sin borrar lo que ya esté lleno —
+    // igual patrón que agregarSolucionSecuencial, pero respetando el mismo
+    // "inicio" (columnasPorFilaLecturas) que ya usaba el código anterior para
+    // saltar la primera fila de la tabla.
+    var COLUMNAS_POR_LECTURA = 3; // valor, ayuda, tolerancia
+
+    function agregarLecturaSecuencial(prefijoNombre, datosFila) {
+        var inputs = document.querySelectorAll('input[name^="' + prefijoNombre + '"]');
+        if (inputs.length === 0) return alert('No se encontraron campos para "' + prefijoNombre + '".');
+
+        var offset = columnasPorFilaLecturas;
+        var totalFilas = Math.floor((inputs.length - offset) / COLUMNAS_POR_LECTURA);
+        for (var fila = 0; fila < totalFilas; fila++) {
+            var base = offset + fila * COLUMNAS_POR_LECTURA;
+            if (!inputs[base].value) {
+                for (var c = 0; c < COLUMNAS_POR_LECTURA && c < datosFila.length; c++) {
+                    inputs[base + c].value = datosFila[c];
+                    dispararEventos(inputs[base + c]);
+                }
+                return;
+            }
+        }
+        alert('Ya no hay espacio libre en esta tabla de Mediciones. Borra alguna fila antes de agregar otra.');
+    }
+
+    // Borra solo los 3 campos de UNA fila de Mediciones (valor, ayuda,
+    // tolerancia), identificada por el índice de su primer campo.
+    function borrarFilaLectura(prefijoNombre, base) {
+        var inputs = document.querySelectorAll('input[name^="' + prefijoNombre + '"]');
+        for (var c = 0; c < COLUMNAS_POR_LECTURA; c++) {
+            if (inputs[base + c]) {
+                inputs[base + c].value = '';
+                dispararEventos(inputs[base + c]);
+            }
+        }
+    }
+
+    // Agrega, junto a cada fila de una tabla de Mediciones que tenga al menos
+    // un campo lleno, un botón "✖" para borrar solo esa fila (mismo patrón
+    // que inyectarBotonesLimpiarFila para Soluciones).
+    function inyectarBotonesLimpiarFilaLecturas(prefijoNombre) {
+        var inputs = document.querySelectorAll('input[name^="' + prefijoNombre + '"]');
+        var offset = columnasPorFilaLecturas;
+        var totalFilas = Math.floor((inputs.length - offset) / COLUMNAS_POR_LECTURA);
+
+        for (var fila = 0; fila < totalFilas; fila++) {
+            var base = offset + fila * COLUMNAS_POR_LECTURA;
+            var inputsFila = [];
+            for (var c = 0; c < COLUMNAS_POR_LECTURA; c++) inputsFila.push(inputs[base + c]);
+
+            var ultimoInput = inputsFila[COLUMNAS_POR_LECTURA - 1];
+            if (!ultimoInput || ultimoInput.dataset.hannaBotonFilaLectura) continue; // ya tiene botón
+            ultimoInput.dataset.hannaBotonFilaLectura = '1';
+
+            (function(baseFila, inputsFila) {
+                var boton = document.createElement('button');
+                boton.type = 'button';
+                boton.innerText = '✖';
+                boton.title = 'Borrar esta fila de Mediciones';
+                boton.style.marginLeft = '6px';
+                boton.style.padding = '2px 7px';
+                boton.style.fontSize = '11px';
+                boton.style.lineHeight = '1.4';
+                boton.style.border = '1px solid #dc3545';
+                boton.style.borderRadius = '4px';
+                boton.style.backgroundColor = '#fff';
+                boton.style.color = '#dc3545';
+                boton.style.cursor = 'pointer';
+                boton.style.display = 'none';
+
+                function actualizarVisibilidad() {
+                    var tieneDatos = inputsFila.some(function(inp) { return inp.value.trim() !== ''; });
+                    boton.style.display = tieneDatos ? 'inline-block' : 'none';
+                }
+
+                boton.onclick = function() {
+                    borrarFilaLectura(prefijoNombre, baseFila);
+                    actualizarVisibilidad();
+                };
+
+                inputsFila.forEach(function(inp) {
+                    inp.addEventListener('input', actualizarVisibilidad);
+                });
+
+                ultimoInput.insertAdjacentElement('afterend', boton);
+                actualizarVisibilidad();
+            })(base, inputsFila);
+        }
+    }
 
     // Agrega UNA solución (código, lote, vencimiento, descripción) en la
     // primera fila vacía de la tabla, SIN borrar lo que ya esté lleno. Así el
@@ -371,45 +471,26 @@
     // de Informe"), un MutationObserver reintenta insertar los selectores cada vez
     // que el DOM cambia, hasta lograrlo.
 
-    var opcionesLecturas = [
-        { categoria: 'pH', items: [
-            { clave: 'ph_temp_1dec', etiqueta: '🧪 pH / T° (1 Dec)' },
-            { clave: 'ph_temp_2dec', etiqueta: '🧪 pH / T° (2 Dec)' },
-            { clave: 'ph_mv_temp', etiqueta: '🧪 pH / mV / T°' }
-        ]},
-        { categoria: 'Conductividad', items: [
-            { clave: 'cond_us', etiqueta: '⚡ Conductividad (µS/cm)' },
-            { clave: 'cond_ms', etiqueta: '⚡ Conductividad (mS/cm)' },
-            { clave: 'cond_potenciometrica', etiqueta: '⚡ Cond. Potenciométrica' }
-        ]},
-        { categoria: 'Oxígeno', items: [
-            { clave: 'oxigeno', etiqueta: '💧 Oxígeno Disuelto' }
-        ]},
-        { categoria: 'Equipos combinados', items: [
-            { clave: 'ph_cond_us_temp_1dec', etiqueta: '🔀 pH / Cond (µS) / T° (1 Dec)' },
-            { clave: 'ph_cond_us_temp_2dec', etiqueta: '🔀 pH / Cond (µS) / T° (2 Dec)' },
-            { clave: 'ph_cond_ms_temp_1dec', etiqueta: '🔀 pH / Cond (mS) / T° (1 Dec)' },
-            { clave: 'ph_cond_ms_temp_2dec', etiqueta: '🔀 pH / Cond (mS) / T° (2 Dec)' },
-            { clave: 'ph_oxigeno_temp', etiqueta: '🔀 pH / Oxígeno / T°' },
-            { clave: 'multi_completo', etiqueta: '📊 Multiparámetro Completo' }
-        ]},
-        { categoria: 'Fotometría y óptica', items: [
-            { clave: 'foto_cloro_ph', etiqueta: '💡 Fotometría (Cloro L, T, pH)' },
-            { clave: 'foto_hi97xx_cloro', etiqueta: '💡 Fotometría HI97XX (Cloro Libre)' },
-            { clave: 'espectrofotometria', etiqueta: '💡 Espectrofotometría' },
-            { clave: 'absorbancia', etiqueta: '💡 Fotometría de Absorbancia' }
-        ]},
-        { categoria: 'Checkers', items: [
-            { clave: 'checker_cloro_libre', etiqueta: '🟩 Checker Cloro Libre' },
-            { clave: 'checker_cloro_total', etiqueta: '🟩 Checker Cloro Total' },
-            { clave: 'checker_hierro', etiqueta: '🟩 Checker Hierro' },
-            { clave: 'checker_color', etiqueta: '🟩 Checker Color de Agua' }
-        ]},
-        { categoria: 'Turbidez', items: [
-            { clave: 'turbi_hi93703', etiqueta: '🌀 Turbidez HI 93703 (3 Patrones)' },
-            { clave: 'turbi_hi98703', etiqueta: '🌀 Turbidez HI 98703' }
-        ]}
-    ];
+    // Construye las opciones del panel de Mediciones (Iniciales/Finales) en
+    // vivo, a partir de lo que haya AHORA MISMO en el Sheet (datosLecturas).
+    // Un grupo por cada valor distinto de "categoria", en el orden en que
+    // aparecen las filas en el Sheet. Igual criterio que Soluciones: cada
+    // fila es un punto de lectura individual que el técnico marca si lo usó.
+    function construirOpcionesLecturasDesdeSheet() {
+        var grupos = {};
+        var orden = [];
+        datosLecturas.forEach(function(fila, indice) {
+            var categoria = fila.categoria || 'Sin categoría';
+            if (!grupos[categoria]) { grupos[categoria] = []; orden.push(categoria); }
+            grupos[categoria].push({
+                clave: String(indice),
+                etiqueta: '🧪 ' + fila.etiqueta
+            });
+        });
+        return orden.map(function(categoria) {
+            return { categoria: categoria, items: grupos[categoria] };
+        });
+    }
 
     // Construye las opciones del menú "Autocompletar Soluciones Estándar"
     // en vivo, a partir de lo que haya AHORA MISMO en el Sheet (datosSheet).
@@ -448,73 +529,6 @@
         return b;
     }
 
-    function crearSelectorInline(opciones, colorBorde, placeholder, onSeleccionar) {
-        var barra = document.createElement('div');
-        barra.style.display = 'flex';
-        barra.style.alignItems = 'center';
-        barra.style.gap = '6px';
-        barra.style.margin = '6px 0';
-        barra.style.fontFamily = 'Arial, sans-serif';
-        barra.className = 'hanna-panel-inline';
-
-        var select = document.createElement('select');
-        select.style.fontSize = '12px';
-        select.style.padding = '4px 6px';
-        select.style.borderRadius = '4px';
-        select.style.border = '1px solid ' + colorBorde;
-        select.style.color = '#495057';
-        select.style.backgroundColor = '#fff';
-        select.style.maxWidth = '360px';
-
-        var optPlaceholder = document.createElement('option');
-        optPlaceholder.textContent = placeholder;
-        optPlaceholder.value = '';
-        optPlaceholder.disabled = true;
-        optPlaceholder.selected = true;
-        select.appendChild(optPlaceholder);
-
-        poblarOpcionesEnSelect(select, opciones);
-
-        select.onchange = function() {
-            var clave = select.value;
-            select.value = ''; // vuelve al placeholder: es un "menú de un solo uso"
-            if (clave) onSeleccionar(clave);
-        };
-
-        barra.appendChild(select);
-        barra.selectEl = select; // permite reconstruir las opciones más adelante (ver refrescarMenuSoluciones)
-        return barra;
-    }
-
-    // Vacía y vuelve a llenar los <optgroup>/<option> de un <select> ya creado,
-    // dejando intacta la opción placeholder (la primera). Se usa tanto al
-    // crear el selector como para refrescarlo cuando cambian los datos del
-    // Sheet (recarga inicial o botón "🔄 Recargar soluciones del Sheet").
-    //
-    // OJO: select.remove(indice) solo quita el <option> pero no borra el
-    // <optgroup> que lo contenía, así que un simple bucle sobre select.remove
-    // deja los <optgroup> anteriores vacíos (huérfanos) en el DOM — eso hacía
-    // que el menú mostrara los nombres de los grupos duplicados y vacíos tras
-    // cada refresco. En vez de eso, quitamos directamente todos los hijos del
-    // <select> salvo la opción placeholder.
-    function poblarOpcionesEnSelect(select, opciones) {
-        var placeholder = select.options[0];
-        while (select.firstChild) select.removeChild(select.firstChild);
-        select.appendChild(placeholder);
-
-        opciones.forEach(function(grupo) {
-            var og = document.createElement('optgroup');
-            og.label = grupo.categoria;
-            grupo.items.forEach(function(item) {
-                var op = document.createElement('option');
-                op.textContent = item.etiqueta;
-                op.value = item.clave;
-                og.appendChild(op);
-            });
-            select.appendChild(og);
-        });
-    }
-
     function anclarAntesDeTabla(inputReferencia, elementoNuevo) {
         if (!inputReferencia) return false;
         var contenedor = inputReferencia.closest('table') || inputReferencia.parentElement;
@@ -529,6 +543,8 @@
 
     var controlesInyectados = { iniciales: false, finales: false, soluciones: false, badge: false };
     var panelSolucionesRef = null; // { poblar } del panel de checkboxes de Soluciones Estándar, para poder refrescarlo
+    var panelLecturasIniRef = null; // { poblar } del panel de checkboxes de Mediciones Iniciales
+    var panelLecturasFinRef = null; // { poblar } del panel de checkboxes de Mediciones Finales
 
     // Vuelve a construir la lista del panel de Soluciones Estándar con lo
     // último que haya en datosSheet. Se llama tras cada carga/recarga del
@@ -539,13 +555,23 @@
         panelSolucionesRef.poblar(construirOpcionesSolucionesDesdeSheet());
     }
 
-    // Panel de checkboxes para elegir varias soluciones de una vez (en vez de
-    // un <select> que se aplica al primer clic). El técnico marca las que
-    // usó, agrupadas por parámetro, y las carga todas juntas con un botón —
-    // cada una cae en la primera fila vacía de la tabla (ver
-    // agregarSolucionSecuencial), así que si ya había algo cargado, lo nuevo
-    // se agrega debajo sin borrarlo.
-    function crearPanelChecklistSoluciones(opcionesIniciales, colorBorde, onCargarSeleccionadas) {
+    // Igual que refrescarMenuSoluciones, pero para los dos paneles de
+    // Mediciones (Iniciales y Finales), con lo último que haya en
+    // datosLecturas.
+    function refrescarMenuLecturas() {
+        var opciones = construirOpcionesLecturasDesdeSheet();
+        if (panelLecturasIniRef) panelLecturasIniRef.poblar(opciones);
+        if (panelLecturasFinRef) panelLecturasFinRef.poblar(opciones);
+    }
+
+    // Panel de checkboxes para elegir varios ítems de una lista de una vez
+    // (en vez de un <select> que se aplica al primer clic). El técnico marca
+    // los que usó, agrupados por categoría/parámetro, y los carga todos
+    // juntos con un botón — cada uno cae en la primera fila vacía de su
+    // tabla, así que si ya había algo cargado, lo nuevo se agrega debajo sin
+    // borrarlo. Se reutiliza tanto para Soluciones Estándar como para
+    // Mediciones Iniciales/Finales.
+    function crearPanelChecklist(opcionesIniciales, colorBorde, textoBotonAbrir, onCargarSeleccionadas) {
         var barra = document.createElement('div');
         barra.style.display = 'flex';
         barra.style.flexDirection = 'column';
@@ -560,7 +586,7 @@
 
         var botonAbrir = document.createElement('button');
         botonAbrir.type = 'button';
-        botonAbrir.innerText = '🧴 Elegir Soluciones Estándar…';
+        botonAbrir.innerText = textoBotonAbrir;
         botonAbrir.style.fontSize = '12px';
         botonAbrir.style.padding = '5px 10px';
         botonAbrir.style.borderRadius = '4px';
@@ -631,7 +657,7 @@
             if (!opciones || opciones.length === 0) {
                 var vacio = document.createElement('div');
                 vacio.style.color = '#6c757d';
-                vacio.innerText = 'Todavía no hay datos del Sheet. Usa "🔄 Recargar soluciones del Sheet" o revisa que el Sheet tenga filas.';
+                vacio.innerText = 'Todavía no hay datos del Sheet. Usa "🔄 Recargar datos del Sheet" o revisa que el Sheet tenga filas.';
                 lista.appendChild(vacio);
                 return;
             }
@@ -696,29 +722,51 @@
         if (!controlesInyectados.iniciales) {
             var refIni = document.querySelector('input[name^="' + PREFIJO_MEDICIONES_INICIALES + '"]');
             if (refIni) {
-                var barraIni = crearSelectorInline(opcionesLecturas, '#17a2b8', '🧪 Autocompletar Mediciones Iniciales…', function(clave) {
-                    llenarLecturas(lecturas[clave]);
+                var panelIni = crearPanelChecklist(construirOpcionesLecturasDesdeSheet(), '#17a2b8', '🧪 Elegir Mediciones Iniciales…', function(clavesSeleccionadas) {
+                    clavesSeleccionadas.forEach(function(clave) {
+                        var fila = datosLecturas[Number(clave)];
+                        if (!fila) return;
+                        agregarLecturaSecuencial(PREFIJO_MEDICIONES_INICIALES, [fila.valor, fila.ayuda, fila.tolerancia]);
+                    });
                 });
-                barraIni.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Mediciones Iniciales', '#17a2b8', borrarLecturas));
-                if (anclarAntesDeTabla(refIni, barraIni)) controlesInyectados.iniciales = true;
+                panelLecturasIniRef = panelIni;
+
+                var filaBotonesIni = panelIni.barra.firstChild;
+                filaBotonesIni.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Mediciones Iniciales', '#17a2b8', borrarLecturas));
+
+                if (anclarAntesDeTabla(refIni, panelIni.barra)) {
+                    controlesInyectados.iniciales = true;
+                    inyectarBotonesLimpiarFilaLecturas(PREFIJO_MEDICIONES_INICIALES);
+                }
             }
         }
 
         if (!controlesInyectados.finales) {
             var refFin = document.querySelector('input[name^="' + PREFIJO_MEDICIONES_FINALES + '"]');
             if (refFin) {
-                var barraFin = crearSelectorInline(opcionesLecturas, '#17a2b8', '🧪 Autocompletar Mediciones Finales…', function(clave) {
-                    llenarMedicionesFinales(lecturas[clave]);
+                var panelFin = crearPanelChecklist(construirOpcionesLecturasDesdeSheet(), '#17a2b8', '🧪 Elegir Mediciones Finales…', function(clavesSeleccionadas) {
+                    clavesSeleccionadas.forEach(function(clave) {
+                        var fila = datosLecturas[Number(clave)];
+                        if (!fila) return;
+                        agregarLecturaSecuencial(PREFIJO_MEDICIONES_FINALES, [fila.valor, fila.ayuda, fila.tolerancia]);
+                    });
                 });
-                barraFin.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Mediciones Finales', '#17a2b8', borrarMedicionesFinales));
-                if (anclarAntesDeTabla(refFin, barraFin)) controlesInyectados.finales = true;
+                panelLecturasFinRef = panelFin;
+
+                var filaBotonesFin = panelFin.barra.firstChild;
+                filaBotonesFin.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Mediciones Finales', '#17a2b8', borrarMedicionesFinales));
+
+                if (anclarAntesDeTabla(refFin, panelFin.barra)) {
+                    controlesInyectados.finales = true;
+                    inyectarBotonesLimpiarFilaLecturas(PREFIJO_MEDICIONES_FINALES);
+                }
             }
         }
 
         if (!controlesInyectados.soluciones) {
             var refSol = document.querySelector('input[name^="' + PREFIJO_SOLUCIONES + '"]');
             if (refSol) {
-                var panelSol = crearPanelChecklistSoluciones(construirOpcionesSolucionesDesdeSheet(), '#28a745', function(clavesSeleccionadas) {
+                var panelSol = crearPanelChecklist(construirOpcionesSolucionesDesdeSheet(), '#28a745', '🧴 Elegir Soluciones Estándar…', function(clavesSeleccionadas) {
                     clavesSeleccionadas.forEach(function(clave) {
                         var fila = datosSheet[Number(clave)];
                         if (!fila) return;
@@ -812,11 +860,14 @@
     miniPanel.appendChild(etiquetaSheetSync);
 
     function actualizarEtiquetaSheetSync() {
-        if (sheetUltimaActualizacion) {
-            etiquetaSheetSync.innerText = '🔄 Lotes sincronizados: ' + sheetUltimaActualizacion.toLocaleString();
-        } else {
-            etiquetaSheetSync.innerText = '⚠️ Sin datos del Sheet todavía (usando valores por defecto).';
-        }
+        var lineas = [];
+        lineas.push(sheetUltimaActualizacion
+            ? '🔄 Soluciones sincronizadas: ' + sheetUltimaActualizacion.toLocaleString()
+            : '⚠️ Sin datos de Soluciones todavía.');
+        lineas.push(sheetLecturasUltimaActualizacion
+            ? '🔄 Mediciones sincronizadas: ' + sheetLecturasUltimaActualizacion.toLocaleString()
+            : '⚠️ Sin datos de Mediciones todavía.');
+        etiquetaSheetSync.innerText = lineas.join(' · ');
     }
 
     function crearBtnMini(texto, color, accion) {
@@ -835,12 +886,20 @@
         return b;
     }
 
-    miniPanel.appendChild(crearBtnMini('🔄 Recargar soluciones del Sheet', '#6c757d', function() {
-        cargarDatosSheet(function(ok) {
+    miniPanel.appendChild(crearBtnMini('🔄 Recargar datos del Sheet', '#6c757d', function() {
+        var pendientes = 2;
+        var todoOk = true;
+        function terminado(ok) {
+            todoOk = todoOk && ok;
+            pendientes--;
+            if (pendientes > 0) return;
             actualizarEtiquetaSheetSync();
             refrescarMenuSoluciones();
-            alert(ok ? 'Soluciones actualizadas desde el Sheet.' : 'No se pudo conectar al Sheet. Se mantienen los últimos datos conocidos.');
-        });
+            refrescarMenuLecturas();
+            alert(todoOk ? 'Soluciones y Mediciones actualizadas desde el Sheet.' : 'No se pudo conectar a alguna de las pestañas del Sheet. Se mantienen los últimos datos conocidos.');
+        }
+        cargarDatosSheet(terminado);
+        cargarDatosLecturas(terminado);
     }));
     miniPanel.appendChild(crearBtnMini('✏️ Abrir Sheet de lotes', '#28a745', abrirEditorSheet));
 
@@ -866,14 +925,20 @@
         }
     }
 
-    // Carga inicial de soluciones: primero lo que quedó en caché (instantáneo),
-    // luego intenta refrescar desde el Sheet en segundo plano. En ambos casos
-    // se refresca el menú por si el selector ya estaba inyectado.
+    // Carga inicial de Soluciones y Mediciones: primero lo que quedó en
+    // caché (instantáneo), luego intenta refrescar cada pestaña del Sheet en
+    // segundo plano. En ambos casos se refresca el panel correspondiente por
+    // si ya estaba inyectado.
     cargarCache();
+    cargarCacheLecturas();
     actualizarEtiquetaSheetSync();
     cargarDatosSheet(function() {
         actualizarEtiquetaSheetSync();
         refrescarMenuSoluciones();
+    });
+    cargarDatosLecturas(function() {
+        actualizarEtiquetaSheetSync();
+        refrescarMenuLecturas();
     });
 
     // Primer intento de inyección (por si todo ya está en el DOM al cargar).
