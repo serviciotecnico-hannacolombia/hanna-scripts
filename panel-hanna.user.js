@@ -168,7 +168,7 @@
     // como antes). El técnico marca en el panel los puntos que usó y se van
     // acumulando en la primera fila vacía de la tabla — igual que Soluciones.
 
-    var SHEET_LECTURAS_CSV_URL = 'PEGA_AQUI_URL_CSV_LECTURAS';
+    var SHEET_LECTURAS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT2t_Y1keodEQiK9Iv4C8PoYmkAe-dFDgVek2z4fAr9IACCV-XDzFvB8jnrBB6J5t4uUwgpwn2W9CSz/pub?gid=419179050&single=true&output=csv';
     var CACHE_KEY_LECTURAS = 'hanna_sheet_cache_lecturas_v1';
     // [{ categoria: "pH", etiqueta: "7.01 pH (2 decimales)", valor: "7.01 pH", ayuda: "...", tolerancia: "±0.05 pH" }, ...]
     var datosLecturas = [];
