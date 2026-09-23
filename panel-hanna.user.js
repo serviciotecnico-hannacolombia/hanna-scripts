@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      14.1
+// @version      14.2
 // @description  Panel completo con mediciones, patrones de T° y menú de Soluciones Estándar 100% dinámico desde Google Sheets (agrupado por parámetro)
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '14.1';
+    var APP_VERSION = '14.2';
 
     var columnasPorFilaLecturas = 3;
 
@@ -528,16 +528,168 @@
     }
 
     var controlesInyectados = { iniciales: false, finales: false, soluciones: false, badge: false };
-    var selectSolucionesEl = null; // referencia al <select> de Soluciones Estándar, para poder refrescarlo
+    var panelSolucionesRef = null; // { poblar } del panel de checkboxes de Soluciones Estándar, para poder refrescarlo
 
-    // Vuelve a construir las opciones del menú de Soluciones Estándar con lo
+    // Vuelve a construir la lista del panel de Soluciones Estándar con lo
     // último que haya en datosSheet. Se llama tras cada carga/recarga del
-    // Sheet (si el selector todavía no existe en el DOM, no hace nada: cuando
-    // se inyecte usará datosSheet ya actualizado).
+    // Sheet (si el panel todavía no existe en el DOM, no hace nada: cuando se
+    // inyecte usará datosSheet ya actualizado).
     function refrescarMenuSoluciones() {
-        if (!selectSolucionesEl) return;
-        poblarOpcionesEnSelect(selectSolucionesEl, construirOpcionesSolucionesDesdeSheet());
-        selectSolucionesEl.value = '';
+        if (!panelSolucionesRef) return;
+        panelSolucionesRef.poblar(construirOpcionesSolucionesDesdeSheet());
+    }
+
+    // Panel de checkboxes para elegir varias soluciones de una vez (en vez de
+    // un <select> que se aplica al primer clic). El técnico marca las que
+    // usó, agrupadas por parámetro, y las carga todas juntas con un botón —
+    // cada una cae en la primera fila vacía de la tabla (ver
+    // agregarSolucionSecuencial), así que si ya había algo cargado, lo nuevo
+    // se agrega debajo sin borrarlo.
+    function crearPanelChecklistSoluciones(opcionesIniciales, colorBorde, onCargarSeleccionadas) {
+        var barra = document.createElement('div');
+        barra.style.display = 'flex';
+        barra.style.flexDirection = 'column';
+        barra.style.margin = '6px 0';
+        barra.style.fontFamily = 'Arial, sans-serif';
+        barra.className = 'hanna-panel-inline';
+
+        var filaBotones = document.createElement('div');
+        filaBotones.style.display = 'flex';
+        filaBotones.style.alignItems = 'center';
+        filaBotones.style.gap = '6px';
+
+        var botonAbrir = document.createElement('button');
+        botonAbrir.type = 'button';
+        botonAbrir.innerText = '🧴 Elegir Soluciones Estándar…';
+        botonAbrir.style.fontSize = '12px';
+        botonAbrir.style.padding = '5px 10px';
+        botonAbrir.style.borderRadius = '4px';
+        botonAbrir.style.border = '1px solid ' + colorBorde;
+        botonAbrir.style.color = '#155724';
+        botonAbrir.style.backgroundColor = '#fff';
+        botonAbrir.style.cursor = 'pointer';
+        filaBotones.appendChild(botonAbrir);
+        barra.appendChild(filaBotones);
+
+        var panel = document.createElement('div');
+        panel.style.display = 'none';
+        panel.style.flexDirection = 'column';
+        panel.style.gap = '8px';
+        panel.style.backgroundColor = '#f8f9fa';
+        panel.style.border = '1px solid #dee2e6';
+        panel.style.borderRadius = '8px';
+        panel.style.padding = '10px';
+        panel.style.marginTop = '6px';
+        panel.style.maxWidth = '420px';
+        panel.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+        panel.style.fontSize = '12px';
+
+        var lista = document.createElement('div');
+        lista.style.display = 'flex';
+        lista.style.flexDirection = 'column';
+        lista.style.gap = '10px';
+        lista.style.maxHeight = '260px';
+        lista.style.overflowY = 'auto';
+        panel.appendChild(lista);
+
+        var filaAcciones = document.createElement('div');
+        filaAcciones.style.display = 'flex';
+        filaAcciones.style.gap = '6px';
+        filaAcciones.style.marginTop = '4px';
+
+        var botonCargar = document.createElement('button');
+        botonCargar.type = 'button';
+        botonCargar.innerText = '➕ Cargar seleccionadas';
+        botonCargar.style.flex = '1';
+        botonCargar.style.padding = '6px 8px';
+        botonCargar.style.fontSize = '12px';
+        botonCargar.style.fontWeight = 'bold';
+        botonCargar.style.color = '#fff';
+        botonCargar.style.backgroundColor = colorBorde;
+        botonCargar.style.border = 'none';
+        botonCargar.style.borderRadius = '4px';
+        botonCargar.style.cursor = 'pointer';
+
+        var botonCancelar = document.createElement('button');
+        botonCancelar.type = 'button';
+        botonCancelar.innerText = 'Cancelar';
+        botonCancelar.style.padding = '6px 10px';
+        botonCancelar.style.fontSize = '12px';
+        botonCancelar.style.color = '#495057';
+        botonCancelar.style.backgroundColor = '#fff';
+        botonCancelar.style.border = '1px solid #ced4da';
+        botonCancelar.style.borderRadius = '4px';
+        botonCancelar.style.cursor = 'pointer';
+
+        filaAcciones.appendChild(botonCargar);
+        filaAcciones.appendChild(botonCancelar);
+        panel.appendChild(filaAcciones);
+        barra.appendChild(panel);
+
+        function poblar(opciones) {
+            lista.innerHTML = '';
+            if (!opciones || opciones.length === 0) {
+                var vacio = document.createElement('div');
+                vacio.style.color = '#6c757d';
+                vacio.innerText = 'Todavía no hay datos del Sheet. Usa "🔄 Recargar soluciones del Sheet" o revisa que el Sheet tenga filas.';
+                lista.appendChild(vacio);
+                return;
+            }
+            opciones.forEach(function(grupo) {
+                var titulo = document.createElement('div');
+                titulo.innerText = grupo.categoria;
+                titulo.style.fontWeight = 'bold';
+                titulo.style.color = '#495057';
+                titulo.style.borderBottom = '1px solid #dee2e6';
+                titulo.style.paddingBottom = '2px';
+                lista.appendChild(titulo);
+
+                grupo.items.forEach(function(item) {
+                    var label = document.createElement('label');
+                    label.style.display = 'flex';
+                    label.style.alignItems = 'flex-start';
+                    label.style.gap = '6px';
+                    label.style.cursor = 'pointer';
+
+                    var checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = item.clave;
+                    checkbox.style.marginTop = '2px';
+
+                    var texto = document.createElement('span');
+                    texto.innerText = item.etiqueta;
+
+                    label.appendChild(checkbox);
+                    label.appendChild(texto);
+                    lista.appendChild(label);
+                });
+            });
+        }
+
+        poblar(opcionesIniciales);
+
+        botonAbrir.onclick = function() {
+            panel.style.display = (panel.style.display === 'none') ? 'flex' : 'none';
+        };
+
+        function cerrarYLimpiarSeleccion() {
+            panel.style.display = 'none';
+            [].slice.call(lista.querySelectorAll('input[type="checkbox"]')).forEach(function(cb) { cb.checked = false; });
+        }
+
+        botonCancelar.onclick = cerrarYLimpiarSeleccion;
+
+        botonCargar.onclick = function() {
+            var seleccionadas = [].slice.call(lista.querySelectorAll('input[type="checkbox"]:checked')).map(function(cb) { return cb.value; });
+            if (seleccionadas.length === 0) {
+                alert('No seleccionaste ninguna solución.');
+                return;
+            }
+            onCargarSeleccionadas(seleccionadas);
+            cerrarYLimpiarSeleccion();
+        };
+
+        return { barra: barra, poblar: poblar };
     }
 
     function intentarInyectarControles() {
@@ -566,16 +718,20 @@
         if (!controlesInyectados.soluciones) {
             var refSol = document.querySelector('input[name^="' + PREFIJO_SOLUCIONES + '"]');
             if (refSol) {
-                var barraSol = crearSelectorInline(construirOpcionesSolucionesDesdeSheet(), '#28a745', '🧴 Autocompletar Soluciones Estándar…', function(clave) {
-                    var fila = datosSheet[Number(clave)];
-                    if (!fila) return;
-                    agregarSolucionSecuencial([fila.codigo, fila.lote, fila.venc, fila.desc]);
+                var panelSol = crearPanelChecklistSoluciones(construirOpcionesSolucionesDesdeSheet(), '#28a745', function(clavesSeleccionadas) {
+                    clavesSeleccionadas.forEach(function(clave) {
+                        var fila = datosSheet[Number(clave)];
+                        if (!fila) return;
+                        agregarSolucionSecuencial([fila.codigo, fila.lote, fila.venc, fila.desc]);
+                    });
                 });
-                selectSolucionesEl = barraSol.selectEl;
-                barraSol.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Soluciones Estándar', '#28a745', borrarSolucionesSecuencial));
-                barraSol.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de lotes/vencimientos', '#28a745', abrirEditorSheet));
+                panelSolucionesRef = panelSol;
 
-                if (anclarAntesDeTabla(refSol, barraSol)) {
+                var filaBotonesSol = panelSol.barra.firstChild; // la fila con el botón "Elegir…"
+                filaBotonesSol.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Soluciones Estándar', '#28a745', borrarSolucionesSecuencial));
+                filaBotonesSol.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de lotes/vencimientos', '#28a745', abrirEditorSheet));
+
+                if (anclarAntesDeTabla(refSol, panelSol.barra)) {
                     controlesInyectados.soluciones = true;
                     inyectarBotonesLimpiarFila();
                 }
