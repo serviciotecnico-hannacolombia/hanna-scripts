@@ -48,29 +48,36 @@ git push -u origin main
 
 En adelante basta con `git add -A && git commit -m "..." && git push`.
 
-## Lotes y vencimientos: fuente única en Google Sheets
+## Soluciones Estándar: panel de checkboxes 100% dinámico desde Google Sheets
 
-Desde v13.1, los lotes y fechas de vencimiento de los estándares/buffers **ya no se escriben a mano en cada navegador**. Se leen automáticamente desde un Google Sheet compartido, así todo el equipo ve siempre el mismo dato.
+Desde v14.0 (y con panel de checkboxes desde v14.2), el botón **"🧴 Elegir Soluciones Estándar…"** ya no tiene nada escrito en el código: la lista que abre se construye en vivo con lo que haya en un Google Sheet compartido. Como cada semana se abren soluciones nuevas (y hasta cambian de referencia), lo único que se mantiene fijo es el **parámetro** — el código, lote, vencimiento y hasta la descripción pueden cambiar todas las semanas sin tocar el script ni GitHub.
 
 ### 1. Crea el Sheet
 
-Crea una hoja de cálculo con estas 4 columnas exactas, en este orden, con encabezado en la fila 1:
+Crea una hoja de cálculo con estas 5 columnas exactas, en este orden, con encabezado en la fila 1:
 
-| codigo | lote | vencimiento | descripcion |
-|---|---|---|---|
-| HI7004L | 2459 | 11/2030 | Buffer pH 4.01 |
-| HI7007L | 2804 | 01/2031 | Buffer pH 7.01 |
-| HI7010L | 3231 | 04/2028 | Buffer pH 10.01 |
-| HI7031L | 2521 | 11/2030 | Conductividad 1413 uS/cm |
-| HI7033L | 3448 | 05/2029 | Conductividad 84 uS/cm |
-| HI7030L | 1637 | 05/2030 | Conductividad 12880 uS/cm |
-| HI7040L | S0089-24 | 09/2029 | Cero Oxígeno Disuelto |
-| HI93703-0 | T0001 | 2028-01 | Estándar 0 FTU |
-| HI93703-10 | T0002 | 2028-01 | Estándar 10 FTU |
-| HI93703-50 | T0003 | 2028-01 | Estándar 50 FTU |
-| HI98703-11 | T0004 | 2028-01 | Kit Estándares NTU |
+| codigo | lote | vencimiento | parametro | descripcion |
+|---|---|---|---|---|
+| HI7004-1L | 3201 | 04/2031 | pH | Solución buffer estándar de pH 4.01 ± 0.01 @ 25 °C (77 °F) |
+| HI7007-1G | 2804 | 03/2031 | pH | Solución buffer estándar de pH 7.01 ± 0.01 @ 25 °C (77 °F) |
+| HI7010-1L | 3241 | 04/2028 | pH | Solución buffer estándar de pH 10.01 ± 0.01 @ 25 °C (77 °F) |
+| HI7030L | 1637 | 05/2030 | CE | Solución estándar de conductividad 12859 ± 50 uS/cm @ 25 °C (77 °F) |
+| HI7031L/C | 2521 | 11/2030 | CE | Solución estándar de conductividad 1413 ± 5 uS/cm @ 25 °C (77 °F) |
+| HI7033L | 2675 | 01/2029 | CE | Solución estándar de conductividad 84 ± 1 uS/cm @ 25 °C (77 °F) |
+| HI7034L | 1890 | 07/2030 | CE | Solución estándar de conductividad 80000 ± 200 uS/cm @ 25 °C (77 °F) |
+| HI7040L | S0069/24 | 07/2029 | OD | Cero Oxígeno Disuelto |
+| HI93703-0 | T0001 | 01/2028 | FTU | Estándar 0 FTU |
+| HI93703-10 | T0002 | 01/2028 | FTU | Estándar 10 FTU |
+| HI93703-50 | T0003 | 01/2028 | FTU | Estándar 50 FTU |
+| HI98703-11 | T0004 | 01/2028 | NTU | Kit Estándares NTU |
 
-(esos son los códigos que el script ya reconoce — puedes agregar más filas con otros códigos si más adelante agregas más estándares, pero **no cambies los códigos existentes** sin actualizar también el script). La columna `descripcion` es opcional: si la dejas vacía en una fila, el script usa la descripción por defecto que trae escrita.
+Notas importantes sobre esta tabla:
+
+- **`codigo`** ya no tiene que coincidir con nada del script — puede ser cualquier referencia, y puede cambiar cada vez que abren una solución nueva.
+- **`parametro`** es lo único que el script usa para agrupar la lista del panel (pH, CE, OD, FTU, NTU, o el que quieras escribir). Si agregas un parámetro nuevo (ej. "Cloro"), aparece solo como grupo nuevo en el panel, sin tocar código.
+- **`descripcion`** es el texto que ve el técnico en cada checkbox del panel. Si la dejas vacía, se muestra el código.
+- Puedes tener varias filas con el mismo parámetro (como las 4 de CE arriba, con distinto rango uS/mS): todas aparecen como opciones separadas dentro del mismo grupo, y el técnico elige la que realmente usó.
+- Agregar o quitar filas del Sheet agrega o quita checkboxes del panel automáticamente — nunca hay que tocar `panel-hanna.user.js` por esto.
 
 ### 2. Publícalo como CSV
 
@@ -92,10 +99,65 @@ y reemplaza ambos placeholders. Sube el `@version`, commit y push.
 ### Cómo se comporta
 
 - Al abrir la página, el panel carga primero lo que tenga en caché local (instantáneo) y en paralelo intenta refrescar desde el Sheet.
-- Si no hay internet o el Sheet no responde, usa el último dato que alcanzó a descargar (o el valor por defecto si nunca ha conectado).
-- El botón **"🔄 Recargar lotes del Sheet"** en el panel fuerza una relectura sin recargar la página.
-- Los botones ⚙️ junto a cada grupo de soluciones ahora abren el Sheet directamente para editar, en vez de la cadena de `prompt()` de antes.
-- Cualquiera con permiso de edición en el Sheet puede actualizar un lote/vencimiento/descripción y, en el siguiente refresh (automático o con el botón 🔄), todos los navegadores lo ven — sin tocar código ni GitHub.
+- Si no hay internet o el Sheet no responde, usa el último dato que alcanzó a descargar.
+- El botón **"🧴 Elegir Soluciones Estándar…"** abre un panel con **checkboxes** agrupados por parámetro (no un desplegable): marca todas las que usaste y dale a **"➕ Cargar seleccionadas"**. Cada una cae en la primera fila vacía de la tabla — si ya había algo cargado, lo nuevo se agrega debajo sin borrarlo. Así arma cualquier combo (pH + CE + OD, etc.) en un solo paso.
+- El panel se cierra solo y desmarca todo después de cargar, listo para la siguiente vez.
+- El botón **"🔄 Recargar soluciones del Sheet"** fuerza una relectura del Sheet (y de la lista de checkboxes) sin recargar la página.
+- Cada fila de la tabla que tenga algo (por el panel o escrita a mano) muestra su propio botón **✖** para borrar solo esa fila. El botón 🗑️ junto al panel borra toda la tabla de una vez.
+- El botón ✏️ abre el Sheet directamente para editar.
+- Cualquiera con permiso de edición en el Sheet puede agregar, quitar o cambiar una fila (código, lote, vencimiento, parámetro o descripción) y, en el siguiente refresh (automático o con el botón 🔄), todos los navegadores lo ven — sin tocar código ni GitHub.
+
+## Mediciones Iniciales/Finales: panel de checkboxes 100% dinámico desde Google Sheets
+
+Desde v15.0, "Mediciones Iniciales" y "Mediciones Finales" funcionan igual que Soluciones Estándar: ya no hay "recetas" fijas escritas en el código (`ph_temp_1dec`, `multi_completo`, etc.). En su lugar, cada punto de lectura individual (un pH, una conductividad, una temperatura...) vive como una fila en una pestaña del Sheet, y el técnico arma la combinación que necesite marcando checkboxes.
+
+### 1. Crea la pestaña "lecturas" en el MISMO Sheet
+
+En el mismo Google Sheet que ya usas para Soluciones, crea una pestaña nueva (ej. `lecturas`) con estas 5 columnas exactas, en este orden, con encabezado en la fila 1:
+
+| categoria | etiqueta | valor | ayuda | tolerancia |
+|---|---|---|---|---|
+| pH | 7.01 pH (2 decimales) | 7.01 pH | 7.01 ± 0.01 pH @25°C | ±0.05 pH |
+| pH | 4.01 pH (2 decimales) | 4.01 pH | 4.01 ± 0.01 pH @25°C | ±0.05 pH |
+| Conductividad | 1413 uS/cm (F.S.) | 1413 uS/cm | 1413±5 uS/cm @25°C | ±2.0% F.S |
+| Temperatura | 25.0°C | 25.0°C | 25.0 °C | ±0.7 °C |
+
+Notas sobre esta tabla:
+
+- **`categoria`** agrupa los checkboxes del panel (pH, Conductividad, Oxígeno, Temperatura, Fotometría y óptica, Absorbancia, Checkers, Turbidez, o la que quieras). Agregar una categoría nueva crea un grupo nuevo en el panel automáticamente.
+- **`etiqueta`** es el texto que ve el técnico en el checkbox.
+- **`valor` / `ayuda` / `tolerancia`** son los tres campos que se escriben en la fila de la tabla de Mediciones cuando se marca esa opción.
+- Cada fila es un punto de lectura **individual** (no un combo armado). Si antes existía un combo tipo "pH + Conductividad + T°", ahora el técnico simplemente marca las 2 o 3 filas que necesita.
+
+Se te entregó por chat una tabla de partida (`lecturas_propuesta.csv`) con las ~46 combinaciones que ya existían en el código anterior, ya separadas en puntos individuales — puedes pegarla directo en esta pestaña y ajustarla desde ahí.
+
+### 2. Publícala como CSV y pega el link en el script
+
+Igual que con Soluciones: `Archivo → Compartir → Publicar en la web` → elige la pestaña `lecturas` → formato **CSV** → Publicar → copia el link. En `panel-hanna.user.js`, busca:
+```js
+var SHEET_LECTURAS_CSV_URL = 'PEGA_AQUI_URL_CSV_LECTURAS';
+```
+y reemplaza el placeholder por ese link. Sube el `@version`, commit y push.
+
+### Cómo se comporta
+
+- Cada tabla (Mediciones Iniciales, Mediciones Finales) tiene su **propio** botón "🧪 Elegir Mediciones Iniciales…" / "🧪 Elegir Mediciones Finales…", con su propio panel de checkboxes agrupado por categoría — son dos paneles independientes que leen la misma pestaña `lecturas`, igual que hoy son dos tablas independientes.
+- Marca las que necesites y dale a "➕ Cargar seleccionadas": cada una cae en la primera fila vacía de esa tabla, sin borrar lo que ya había cargado.
+- Cada fila de Mediciones que tenga datos muestra su propio botón **✖** para borrarla; el 🗑️ junto al panel borra toda la tabla de una vez.
+- El botón **"🔄 Recargar datos del Sheet"** ahora refresca **ambas** pestañas (Soluciones y Mediciones) en un solo clic.
+- Cualquiera con permiso de edición puede agregar, quitar o cambiar filas de `lecturas` y, en el siguiente refresh, todos los navegadores lo ven — sin tocar código ni GitHub.
+
+⚠️ **Pendiente de revisar en el Sheet**: la fila "Checker Cloro Total 1.50 ppm" quedó con el dato original incompleto (no tenía tolerancia definida en el script viejo). Complétala directamente en la pestaña `lecturas` cuando tengas el valor real — no hace falta tocar código.
+
+### Marcador de resultado (✔ / ✘ / Inestable)
+
+Desde v15.1, apenas el campo **"Referencia del equipo"** de una fila de Mediciones (Iniciales o Finales) tiene algo escrito, aparece un pequeño botón **●** justo al lado. Al hacer clic se abre un mini menú con 3 opciones:
+
+- **✔ Correcto** (verde)
+- **✘ Incorrecto** (rojo)
+- **Inestable** (naranja)
+
+Al elegir una, se agrega al final de lo que ya estaba escrito en ese campo (ej. `7.0 pH <b><FONT COLOR="green">✔</FONT></b>`), que es como el sistema de la intranet pinta esos íconos de color en el informe. Si cambias de opinión y eliges otra opción, la marca anterior se reemplaza — nunca quedan dos marcas juntas. Si borras el campo, el botón desaparece solo.
 
 ## Cuando hagas un cambio
 

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      15.0
-// @description  Panel completo con Mediciones (Iniciales/Finales) y Soluciones Estándar 100% dinámicas desde Google Sheets, con paneles de checkboxes agrupados
+// @version      15.1
+// @description  Panel completo con Mediciones (Iniciales/Finales) y Soluciones Estándar 100% dinámicas desde Google Sheets, con paneles de checkboxes agrupados y marcador de resultado (✔/✘/Inestable)
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
 // @grant        none
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '15.0';
+    var APP_VERSION = '15.1';
 
     var columnasPorFilaLecturas = 3;
 
@@ -350,6 +350,142 @@
                 ultimoInput.insertAdjacentElement('afterend', boton);
                 actualizarVisibilidad();
             })(base, inputsFila);
+        }
+    }
+
+    // ------------------------------------------
+    // Marcador de resultado (✔ / ✘ / Inestable) en el campo "Referencia del
+    // equipo" (primer campo de cada fila de Mediciones). Un pequeño botón
+    // "●" aparece junto al campo apenas tiene texto, y abre un popover con
+    // las 3 opciones. Elegir una reemplaza cualquier marca anterior (nunca
+    // deja dos marcas encimadas) y la agrega al final de lo ya escrito.
+    // ------------------------------------------
+    var MARCADORES_ESTADO = [
+        { etiqueta: '✔ Correcto', color: '#28a745', html: '<b><FONT COLOR="green">✔</FONT></b>' },
+        { etiqueta: '✘ Incorrecto', color: '#dc3545', html: '<b><FONT COLOR="red">✘</FONT></b>' },
+        { etiqueta: 'Inestable', color: '#fd7e14', html: '<b><FONT COLOR="orange">Inestable</FONT></b>' }
+    ];
+
+    // Reconoce cualquiera de las 3 marcas (con o sin coma final, por si algún
+    // técnico la escribió a mano antes) al final del texto, para quitarla
+    // antes de poner la nueva.
+    var REGEX_MARCADOR_ESTADO_FINAL = /\s*<b><FONT COLOR="(?:green|red|orange)">(?:✔|✘|Inestable)<\/FONT><\/b>\s*,?\s*$/i;
+
+    function quitarMarcadorEstado(valor) {
+        return (valor || '').replace(REGEX_MARCADOR_ESTADO_FINAL, '');
+    }
+
+    function aplicarMarcadorEstado(input, marcador) {
+        var base = quitarMarcadorEstado(input.value).trim();
+        input.value = base + (base ? ' ' : '') + marcador.html;
+        dispararEventos(input);
+    }
+
+    // Todos los popovers de estado abiertos, para poder cerrarlos con un
+    // solo listener de clic global (en vez de uno por fila).
+    var popoversEstadoActivos = [];
+    document.addEventListener('click', function(e) {
+        popoversEstadoActivos.forEach(function(popover) {
+            if (popover.style.display !== 'none' && !popover.contains(e.target)) {
+                popover.style.display = 'none';
+            }
+        });
+    });
+
+    // Agrega, junto al campo "Referencia del equipo" de cada fila de una
+    // tabla de Mediciones, un pequeño botón "●" que abre un mini menú con
+    // ✔ / ✘ / Inestable. Al elegir una opción, se agrega al final de lo que
+    // el técnico ya escribió en ese campo (reemplazando cualquier marca
+    // anterior).
+    function inyectarBotonesEstadoLecturas(prefijoNombre) {
+        var inputs = document.querySelectorAll('input[name^="' + prefijoNombre + '"]');
+        var offset = columnasPorFilaLecturas;
+        var totalFilas = Math.floor((inputs.length - offset) / COLUMNAS_POR_LECTURA);
+
+        for (var fila = 0; fila < totalFilas; fila++) {
+            var base = offset + fila * COLUMNAS_POR_LECTURA;
+            var inputValor = inputs[base];
+            if (!inputValor || inputValor.dataset.hannaBotonEstado) continue; // ya tiene botón
+            inputValor.dataset.hannaBotonEstado = '1';
+
+            (function(inputValor) {
+                var envoltorio = document.createElement('span');
+                envoltorio.style.position = 'relative';
+                envoltorio.style.display = 'inline-block';
+
+                var boton = document.createElement('button');
+                boton.type = 'button';
+                boton.innerText = '●';
+                boton.title = 'Marcar resultado (✔ / ✘ / Inestable)';
+                boton.style.marginLeft = '6px';
+                boton.style.padding = '0 4px';
+                boton.style.fontSize = '14px';
+                boton.style.lineHeight = '1.6';
+                boton.style.border = 'none';
+                boton.style.backgroundColor = 'transparent';
+                boton.style.color = '#6c757d';
+                boton.style.cursor = 'pointer';
+                boton.style.display = 'none';
+                boton.style.verticalAlign = 'middle';
+
+                var popover = document.createElement('div');
+                popover.style.display = 'none';
+                popover.style.flexDirection = 'column';
+                popover.style.position = 'absolute';
+                popover.style.top = '22px';
+                popover.style.left = '0';
+                popover.style.zIndex = '9999';
+                popover.style.backgroundColor = '#fff';
+                popover.style.border = '1px solid #dee2e6';
+                popover.style.borderRadius = '6px';
+                popover.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                popover.style.padding = '4px';
+                popover.style.whiteSpace = 'nowrap';
+                popover.style.fontFamily = 'Arial, sans-serif';
+                popoversEstadoActivos.push(popover);
+
+                MARCADORES_ESTADO.forEach(function(marcador) {
+                    var opcion = document.createElement('button');
+                    opcion.type = 'button';
+                    opcion.innerText = marcador.etiqueta;
+                    opcion.style.display = 'block';
+                    opcion.style.width = '100%';
+                    opcion.style.border = 'none';
+                    opcion.style.background = 'none';
+                    opcion.style.color = marcador.color;
+                    opcion.style.fontWeight = 'bold';
+                    opcion.style.fontSize = '12px';
+                    opcion.style.textAlign = 'left';
+                    opcion.style.padding = '4px 8px';
+                    opcion.style.cursor = 'pointer';
+                    opcion.style.borderRadius = '4px';
+                    opcion.onmouseenter = function() { opcion.style.backgroundColor = '#f8f9fa'; };
+                    opcion.onmouseleave = function() { opcion.style.backgroundColor = 'transparent'; };
+                    opcion.onclick = function() {
+                        aplicarMarcadorEstado(inputValor, marcador);
+                        popover.style.display = 'none';
+                    };
+                    popover.appendChild(opcion);
+                });
+
+                function actualizarVisibilidad() {
+                    var tieneTexto = inputValor.value.trim() !== '';
+                    boton.style.display = tieneTexto ? 'inline-block' : 'none';
+                    if (!tieneTexto) popover.style.display = 'none';
+                }
+
+                boton.onclick = function(e) {
+                    e.stopPropagation();
+                    popover.style.display = (popover.style.display === 'none') ? 'flex' : 'none';
+                };
+
+                inputValor.addEventListener('input', actualizarVisibilidad);
+
+                inputValor.insertAdjacentElement('afterend', envoltorio);
+                envoltorio.appendChild(boton);
+                envoltorio.appendChild(popover);
+                actualizarVisibilidad();
+            })(inputValor);
         }
     }
 
@@ -737,6 +873,7 @@
                 if (anclarAntesDeTabla(refIni, panelIni.barra)) {
                     controlesInyectados.iniciales = true;
                     inyectarBotonesLimpiarFilaLecturas(PREFIJO_MEDICIONES_INICIALES);
+                    inyectarBotonesEstadoLecturas(PREFIJO_MEDICIONES_INICIALES);
                 }
             }
         }
@@ -759,6 +896,7 @@
                 if (anclarAntesDeTabla(refFin, panelFin.barra)) {
                     controlesInyectados.finales = true;
                     inyectarBotonesLimpiarFilaLecturas(PREFIJO_MEDICIONES_FINALES);
+                    inyectarBotonesEstadoLecturas(PREFIJO_MEDICIONES_FINALES);
                 }
             }
         }
