@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      13.5
-// @description  Panel completo con mediciones, patrones de T° y 3 estándares para turbidez HI93703
+// @version      14.0
+// @description  Panel completo con mediciones, patrones de T° y menú de Soluciones Estándar 100% dinámico desde Google Sheets (agrupado por parámetro)
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
 // @grant        none
@@ -14,17 +14,24 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '13.5';
+    var APP_VERSION = '14.0';
 
     var columnasPorFilaLecturas = 3;
 
     // ==========================================
-    // 0. LOTES Y VENCIMIENTOS DESDE GOOGLE SHEETS
+    // 0. SOLUCIONES ESTÁNDAR DESDE GOOGLE SHEETS (100% dinámico)
     // ==========================================
-    // La hoja debe tener, en este orden, las columnas: codigo | lote | vencimiento | descripcion
-    // (con encabezado en la fila 1). El "codigo" debe coincidir exacto con los
-    // códigos usados abajo (HI7004L, HI7031L, etc). La columna "descripcion" es
-    // opcional: si una fila la deja vacía, se usa la descripción por defecto del script.
+    // La hoja debe tener, en este orden, las columnas:
+    //   codigo | lote | vencimiento | parametro | descripcion
+    // (con encabezado en la fila 1). A diferencia de antes, el "codigo" YA NO
+    // tiene que coincidir con nada escrito en el script: cualquier fila que
+    // pongas aquí aparece automáticamente en el menú "Autocompletar Soluciones
+    // Estándar", agrupada por el valor de "parametro" (ej. pH, CE, OD, FTU,
+    // NTU...). Puedes agregar, quitar o cambiar filas (incluso el código/
+    // referencia) cada semana sin tocar el código del script — lo único que
+    // debe mantenerse es el nombre del parámetro, para que la fila caiga en el
+    // grupo correcto del menú. La columna "descripcion" es la que se usa como
+    // texto de cada opción del menú; si la dejas vacía, se usa el código.
     //
     // Cómo obtener las dos URLs de abajo:
     //  1. SHEET_CSV_URL: en el Sheet -> Archivo -> Compartir -> Publicar en la web
@@ -36,7 +43,9 @@
     var SHEET_EDIT_URL = 'https://docs.google.com/spreadsheets/d/1AzJX5B-myRtumple68r7ZXGpE7Xc3nLtkddG5i9rD98/edit?gid=0#gid=0';
 
     var CACHE_KEY = 'hanna_sheet_cache_v1';
-    var datosSheet = {};       // { "HI7004L": { lote: "2459", venc: "11/2030", desc: "Buffer pH 4.01" }, ... }
+    // Lista de filas tal cual están en el Sheet (en orden), no un diccionario:
+    // [{ codigo: "HI7004-1L", lote: "3201", venc: "04/2031", parametro: "pH", desc: "Solución buffer..." }, ...]
+    var datosSheet = [];
     var sheetUltimaActualizacion = null;
 
     // Parser CSV simple (soporta campos entre comillas con comas dentro).
@@ -58,10 +67,18 @@
     }
 
     function aplicarFilasSheet(filas) {
-        var nuevo = {};
+        var nuevo = [];
         filas.forEach(function(campos) {
-            var codigo = campos[0], lote = campos[1], venc = campos[2], desc = campos[3];
-            if (codigo) nuevo[codigo] = { lote: lote || '', venc: venc || '', desc: desc || '' };
+            var codigo = (campos[0] || '').trim();
+            var lote = campos[1], venc = campos[2], parametro = campos[3], desc = campos[4];
+            if (!codigo) return; // fila vacía o sin código: se ignora
+            nuevo.push({
+                codigo: codigo,
+                lote: lote || '',
+                venc: venc || '',
+                parametro: (parametro || '').trim() || 'Sin parámetro',
+                desc: desc || ''
+            });
         });
         datosSheet = nuevo;
     }
@@ -101,18 +118,6 @@
                 console.warn('[Panel Hanna] No se pudo leer el Sheet de lotes, usando último dato conocido / valores por defecto.', err);
                 if (callback) callback(false);
             });
-    }
-
-    function getLote(codigo, defecto) {
-        return (datosSheet[codigo] && datosSheet[codigo].lote) || defecto;
-    }
-
-    function getVenc(codigo, defecto) {
-        return (datosSheet[codigo] && datosSheet[codigo].venc) || defecto;
-    }
-
-    function getDescripcion(codigo, defecto) {
-        return (datosSheet[codigo] && datosSheet[codigo].desc) || defecto;
     }
 
     function abrirEditorSheet() {
@@ -173,61 +178,8 @@
         turbi_hi98703: ["0.10 NTU", "0.10 NTU@25°C", "±2% o 0.02 NTU lo que sea >","15.0 NTU", "15.0 NTU@25°C", "±2% o 0.02 NTU lo que sea >","100 NTU", "100 NTU@25°C", "±2% o 0.02 NTU lo que sea >","750 NTU", "750 NTU@25°C", "±2% o 0.02 NTU lo que sea >"]
     };
 
-    // SOLUCIONES ESTÁNDAR (Dinámicas por Lote, Vencimiento y Descripción)
-    function obtenerSoluciones() {
-        return {
-            ph: [
-                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), getDescripcion("HI7004L", "Buffer pH 4.01"),
-                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), getDescripcion("HI7007L", "Buffer pH 7.01"),
-                "HI7010L", getLote("HI7010L", "L0003"), getVenc("HI7010L", "2028-01"), getDescripcion("HI7010L", "Buffer pH 10.01")
-            ],
-            cond_us: [
-                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), getDescripcion("HI7031L", "Conductividad 1413 uS/cm"),
-                "HI7033L", getLote("HI7033L", "C0002"), getVenc("HI7033L", "2028-01"), getDescripcion("HI7033L", "Conductividad 84 uS/cm")
-            ],
-            cond_ms: [
-                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), getDescripcion("HI7030L", "Conductividad 12880 uS/cm")
-            ],
-            cond_potenciometrica: [
-                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), getDescripcion("HI7031L", "Estándar Cond. Potenciométrica 1413 uS/cm"),
-                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), getDescripcion("HI7030L", "Estándar Cond. Potenciométrica 12880 uS/cm")
-            ],
-            oxigeno: [
-                "HI7040L", getLote("HI7040L", "D0001"), getVenc("HI7040L", "2028-01"), getDescripcion("HI7040L", "Cero Oxígeno Disuelto")
-            ],
-            ph_cond_us: [
-                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), getDescripcion("HI7004L", "Buffer pH 4.01"),
-                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), getDescripcion("HI7007L", "Buffer pH 7.01"),
-                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), getDescripcion("HI7031L", "Conductividad 1413 uS/cm")
-            ],
-            ph_cond_ms: [
-                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), getDescripcion("HI7004L", "Buffer pH 4.01"),
-                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), getDescripcion("HI7007L", "Buffer pH 7.01"),
-                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), getDescripcion("HI7030L", "Conductividad 12880 uS/cm")
-            ],
-            multiparametro: [
-                "HI7004L", getLote("HI7004L", "L0001"), getVenc("HI7004L", "2028-01"), getDescripcion("HI7004L", "Buffer pH 4.01"),
-                "HI7007L", getLote("HI7007L", "L0002"), getVenc("HI7007L", "2028-01"), getDescripcion("HI7007L", "Buffer pH 7.01"),
-                "HI7010L", getLote("HI7010L", "L0003"), getVenc("HI7010L", "2028-01"), getDescripcion("HI7010L", "Buffer pH 10.01"),
-                "HI7031L", getLote("HI7031L", "C0001"), getVenc("HI7031L", "2028-01"), getDescripcion("HI7031L", "Conductividad 1413 uS/cm"),
-                "HI7030L", getLote("HI7030L", "C0003"), getVenc("HI7030L", "2028-01"), getDescripcion("HI7030L", "Conductividad 12880 uS/cm"),
-                "HI7040L", getLote("HI7040L", "D0001"), getVenc("HI7040L", "2028-01"), getDescripcion("HI7040L", "Cero Oxígeno Disuelto"),
-                "HI9828-1", getLote("HI9828-1", "M0001"), getVenc("HI9828-1", "2028-01"), getDescripcion("HI9828-1", "Calibración Rápida Quick Cal")
-            ],
-            fotometria: ["HI93701-01", getLote("HI93701-01", "F0001"), getVenc("HI93701-01", "2028-01"), getDescripcion("HI93701-01", "Reactivo Cloro Libre")],
-            espectrofotometria: ["HI801-11", getLote("HI801-11", "E0001"), getVenc("HI801-11", "2028-01"), getDescripcion("HI801-11", "Filtros Calibración Espectrofotómetro")],
-            absorbancia: ["HI76404", getLote("HI76404", "A0001"), getVenc("HI76404", "2028-01"), getDescripcion("HI76404", "Patrón Absorbancia Calibración")],
-            checkers: ["HI701-25", getLote("HI701-25", "K0001"), getVenc("HI701-25", "2028-01"), getDescripcion("HI701-25", "Reactivo Checker Cloro Libre")],
-            turbi_hi93703: [
-                "HI93703-0", getLote("HI93703-0", "T0001"), getVenc("HI93703-0", "2028-01"), getDescripcion("HI93703-0", "Estándar 0 FTU"),
-                "HI93703-10", getLote("HI93703-10", "T0002"), getVenc("HI93703-10", "2028-01"), getDescripcion("HI93703-10", "Estándar 10 FTU"),
-                "HI93703-50", getLote("HI93703-50", "T0003"), getVenc("HI93703-50", "2028-01"), getDescripcion("HI93703-50", "Estándar 50 FTU")
-            ],
-            turbi_hi98703: [
-                "HI98703-11", getLote("HI98703-11", "T0004"), getVenc("HI98703-11", "2028-01"), getDescripcion("HI98703-11", "Kit Estándares NTU")
-            ]
-        };
-    }
+    // Las "Soluciones Estándar" ya NO se definen aquí: se construyen en vivo
+    // desde datosSheet (ver Sección 3, construirOpcionesSolucionesDesdeSheet()).
 
     // ==========================================
     // 2. FUNCIONES DE AUTOMATIZACIÓN
@@ -273,20 +225,30 @@
     function llenarMedicionesFinales(matrizDatos) { llenarTablaMediciones(PREFIJO_MEDICIONES_FINALES, matrizDatos); }
     function borrarMedicionesFinales() { borrarTablaMediciones(PREFIJO_MEDICIONES_FINALES); }
 
-    function llenarSolucionesSecuencial(listaDatos) {
+    // Agrega UNA solución (código, lote, vencimiento, descripción) en la
+    // primera fila vacía de la tabla, SIN borrar lo que ya esté lleno. Así el
+    // técnico arma cualquier combo (pH + CE + OD, etc.) eligiendo del menú una
+    // solución a la vez, en vez de un combo prearmado en el código.
+    var COLUMNAS_POR_SOLUCION = 4; // código, lote, vencimiento, descripción
+
+    function agregarSolucionSecuencial(datosFila) {
         var inputs = document.querySelectorAll('input[name^="' + PREFIJO_SOLUCIONES + '"], table input[name*="soluciones"]');
         if (inputs.length === 0) inputs = document.querySelectorAll('input[type="text"]');
         if (inputs.length === 0) return alert('No se encontraron campos de soluciones.');
 
-        borrarSolucionesSecuencial();
-
-        for (var i = 0; i < inputs.length; i++) {
-            if (i < listaDatos.length) {
-                inputs[i].value = listaDatos[i];
-                inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-                inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
+        var totalFilas = Math.floor(inputs.length / COLUMNAS_POR_SOLUCION);
+        for (var fila = 0; fila < totalFilas; fila++) {
+            var base = fila * COLUMNAS_POR_SOLUCION;
+            if (!inputs[base].value) {
+                for (var c = 0; c < COLUMNAS_POR_SOLUCION && c < datosFila.length; c++) {
+                    inputs[base + c].value = datosFila[c];
+                    inputs[base + c].dispatchEvent(new Event('input', { bubbles: true }));
+                    inputs[base + c].dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                return;
             }
         }
+        alert('Ya no hay espacio libre en la tabla de Soluciones Estándar. Borra alguna fila (🗑️) antes de agregar otra.');
     }
 
     function borrarSolucionesSecuencial() {
@@ -348,30 +310,27 @@
         ]}
     ];
 
-    var opcionesSoluciones = [
-        { categoria: 'Individuales', items: [
-            { clave: 'ph', etiqueta: '🧴 Soluciones pH' },
-            { clave: 'cond_us', etiqueta: '🧴 Soluciones Cond (µS/cm)' },
-            { clave: 'cond_ms', etiqueta: '🧴 Soluciones Cond (mS/cm)' },
-            { clave: 'cond_potenciometrica', etiqueta: '🧴 Soluciones Cond. Potenciométrica' },
-            { clave: 'oxigeno', etiqueta: '🧴 Soluciones Oxígeno' }
-        ]},
-        { categoria: 'Combinados', items: [
-            { clave: 'ph_cond_us', etiqueta: '🔀 Soluciones pH + Cond (µS/cm)' },
-            { clave: 'ph_cond_ms', etiqueta: '🔀 Soluciones pH + Cond (mS/cm)' },
-            { clave: 'multiparametro', etiqueta: '📊 Soluciones Multiparámetro Completo' }
-        ]},
-        { categoria: 'Fotometría / ópticos', items: [
-            { clave: 'fotometria', etiqueta: '🧴 Reactivos Fotometría' },
-            { clave: 'espectrofotometria', etiqueta: '🧴 Reactivos Espectrofotometría' },
-            { clave: 'absorbancia', etiqueta: '🧴 Patrones de Absorbancia' },
-            { clave: 'checkers', etiqueta: '🧴 Reactivos Checkers' }
-        ]},
-        { categoria: 'Turbidez', items: [
-            { clave: 'turbi_hi93703', etiqueta: '🌀 Soluciones Turbidez HI 93703' },
-            { clave: 'turbi_hi98703', etiqueta: '🌀 Soluciones Turbidez HI 98703' }
-        ]}
-    ];
+    // Construye las opciones del menú "Autocompletar Soluciones Estándar"
+    // en vivo, a partir de lo que haya AHORA MISMO en el Sheet (datosSheet).
+    // Un grupo (optgroup) por cada valor distinto de "parametro", en el orden
+    // en que aparecen las filas en el Sheet. Cada fila es una opción propia:
+    // no se arma ningún combo en el código, así que agregar/quitar/cambiar
+    // filas en el Sheet cambia el menú automáticamente, sin tocar el script.
+    function construirOpcionesSolucionesDesdeSheet() {
+        var grupos = {};
+        var orden = [];
+        datosSheet.forEach(function(fila, indice) {
+            var parametro = fila.parametro || 'Sin parámetro';
+            if (!grupos[parametro]) { grupos[parametro] = []; orden.push(parametro); }
+            grupos[parametro].push({
+                clave: String(indice),
+                etiqueta: '🧴 ' + (fila.desc || fila.codigo)
+            });
+        });
+        return orden.map(function(parametro) {
+            return { categoria: parametro, items: grupos[parametro] };
+        });
+    }
 
     function crearBotonIcono(icono, titulo, colorBorde, accion) {
         var b = document.createElement('button');
@@ -413,6 +372,25 @@
         optPlaceholder.selected = true;
         select.appendChild(optPlaceholder);
 
+        poblarOpcionesEnSelect(select, opciones);
+
+        select.onchange = function() {
+            var clave = select.value;
+            select.value = ''; // vuelve al placeholder: es un "menú de un solo uso"
+            if (clave) onSeleccionar(clave);
+        };
+
+        barra.appendChild(select);
+        barra.selectEl = select; // permite reconstruir las opciones más adelante (ver refrescarMenuSoluciones)
+        return barra;
+    }
+
+    // Vacía y vuelve a llenar los <optgroup>/<option> de un <select> ya creado,
+    // dejando intacta la opción placeholder (la primera). Se usa tanto al
+    // crear el selector como para refrescarlo cuando cambian los datos del
+    // Sheet (recarga inicial o botón "🔄 Recargar lotes del Sheet").
+    function poblarOpcionesEnSelect(select, opciones) {
+        while (select.options.length > 1) select.remove(1);
         opciones.forEach(function(grupo) {
             var og = document.createElement('optgroup');
             og.label = grupo.categoria;
@@ -424,15 +402,6 @@
             });
             select.appendChild(og);
         });
-
-        select.onchange = function() {
-            var clave = select.value;
-            select.value = ''; // vuelve al placeholder: es un "menú de un solo uso"
-            if (clave) onSeleccionar(clave);
-        };
-
-        barra.appendChild(select);
-        return barra;
     }
 
     function anclarAntesDeTabla(inputReferencia, elementoNuevo) {
@@ -448,6 +417,17 @@
     }
 
     var controlesInyectados = { iniciales: false, finales: false, soluciones: false, badge: false };
+    var selectSolucionesEl = null; // referencia al <select> de Soluciones Estándar, para poder refrescarlo
+
+    // Vuelve a construir las opciones del menú de Soluciones Estándar con lo
+    // último que haya en datosSheet. Se llama tras cada carga/recarga del
+    // Sheet (si el selector todavía no existe en el DOM, no hace nada: cuando
+    // se inyecte usará datosSheet ya actualizado).
+    function refrescarMenuSoluciones() {
+        if (!selectSolucionesEl) return;
+        poblarOpcionesEnSelect(selectSolucionesEl, construirOpcionesSolucionesDesdeSheet());
+        selectSolucionesEl.value = '';
+    }
 
     function intentarInyectarControles() {
         if (!controlesInyectados.iniciales) {
@@ -475,9 +455,12 @@
         if (!controlesInyectados.soluciones) {
             var refSol = document.querySelector('input[name^="' + PREFIJO_SOLUCIONES + '"]');
             if (refSol) {
-                var barraSol = crearSelectorInline(opcionesSoluciones, '#28a745', '🧴 Autocompletar Soluciones Estándar…', function(clave) {
-                    llenarSolucionesSecuencial(obtenerSoluciones()[clave]);
+                var barraSol = crearSelectorInline(construirOpcionesSolucionesDesdeSheet(), '#28a745', '🧴 Autocompletar Soluciones Estándar…', function(clave) {
+                    var fila = datosSheet[Number(clave)];
+                    if (!fila) return;
+                    agregarSolucionSecuencial([fila.codigo, fila.lote, fila.venc, fila.desc]);
                 });
+                selectSolucionesEl = barraSol.selectEl;
                 barraSol.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Soluciones Estándar', '#28a745', borrarSolucionesSecuencial));
                 barraSol.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de lotes/vencimientos', '#28a745', abrirEditorSheet));
 
@@ -582,10 +565,11 @@
         return b;
     }
 
-    miniPanel.appendChild(crearBtnMini('🔄 Recargar lotes del Sheet', '#6c757d', function() {
+    miniPanel.appendChild(crearBtnMini('🔄 Recargar soluciones del Sheet', '#6c757d', function() {
         cargarDatosSheet(function(ok) {
             actualizarEtiquetaSheetSync();
-            alert(ok ? 'Lotes actualizados desde el Sheet.' : 'No se pudo conectar al Sheet. Se mantienen los últimos datos conocidos.');
+            refrescarMenuSoluciones();
+            alert(ok ? 'Soluciones actualizadas desde el Sheet.' : 'No se pudo conectar al Sheet. Se mantienen los últimos datos conocidos.');
         });
     }));
     miniPanel.appendChild(crearBtnMini('✏️ Abrir Sheet de lotes', '#28a745', abrirEditorSheet));
@@ -612,11 +596,15 @@
         }
     }
 
-    // Carga inicial de lotes: primero lo que quedó en caché (instantáneo),
-    // luego intenta refrescar desde el Sheet en segundo plano.
+    // Carga inicial de soluciones: primero lo que quedó en caché (instantáneo),
+    // luego intenta refrescar desde el Sheet en segundo plano. En ambos casos
+    // se refresca el menú por si el selector ya estaba inyectado.
     cargarCache();
     actualizarEtiquetaSheetSync();
-    cargarDatosSheet(actualizarEtiquetaSheetSync);
+    cargarDatosSheet(function() {
+        actualizarEtiquetaSheetSync();
+        refrescarMenuSoluciones();
+    });
 
     // Primer intento de inyección (por si todo ya está en el DOM al cargar).
     intentarInyectarControles();
