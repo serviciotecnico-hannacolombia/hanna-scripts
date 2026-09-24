@@ -1,0 +1,126 @@
+###ESTADO_FISICO_EXTERNO###
+<b>Antecedentes:</b>
+<b>Motivo de ingreso:</b>
+
+
+<b>Medidor (HI XXXX):</b>
+Carcasa:
+Teclado: (Conmutación)
+         (mascara)
+Protector de pantalla:
+Encendido y visualización:
+Conector: [De la sonda(s)]
+          (USB)
+Accesorios: (Adaptador de voltaje)
+            (porta electrodos)
+
+
+<b>Sonda(pH/ISE/ORP HI XXXX):</b>
+Carcasa:
+Cable:
+Conector:
+Elemento sensitivo:
+Unión de referencia:
+Solución interna:
+
+<b>Sonda(temperatura HI 7662):</b>
+Carcasa:
+Cable:
+Conector:
+Elemento sensitivo:
+
+<b>Sonda(CE HI XXXX):</b>
+Carcasa:
+Cable:
+Conector:
+Elemento sensitivo:
+
+<b>Sonda Oxígeno Disuelto (HI XXXX):</b>
+Carcasa:
+Cable:
+Conector:
+Elemento sensitivo:
+Membrana o Smart Cap:
+
+<mark style="background-color: lightgreen;">[OK]</mark>
+<mark style="background-color: orange;">[Atención]</mark>
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###ESTADO_FISICO_INTERNO###
+
+<b>Medidor (HI XXXX):</b>
+
+Carcasa:
+Tarjeta electrónica: (Circuitos)
+                     (componentes)
+                     (Pantalla)
+
+
+<mark style="background-color: lightgreen;">[OK]</mark>
+<mark style="background-color: orange;">[Atención]</mark>
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###DE ACUERDO CON LOS RESULTADOS OBTENIDOS ¿SE REQUIEREN ACCIONES CORRECTIVAS O PREVENTIVAS?###
+
+Se sometieron los sensores a protocolos de limpieza y acondicionamiento.
+
+###MÉTODO_DE_VERIIFCACIÓN###
+
+Se realiza revisión de las mediciones empleando soluciones estándar para el ajuste y comprobación de calibración de (CE, pH, ISE, ORP, oxígeno disuelto) marca Hanna.
+
+Adicionalmente el medidor es verificado empleando simulador de: (mV(pH)/temperatura)
+                                                                (CE/temperatura)
+                                                                (%OD/temperatura)
+###OBSERVACIONES###
+
+<b>Medidor (HI XXXX):</b>
+<b> Sonda pH/ISE/ORP (HI XXXX):</b>
+<b> Sonda (HI T°):</b>
+<b> Sonda CE (HI XXXX):</b>
+<b> Sonda OD (HI XXXX):</b>
+
+<b>Limpieza y cuidados especiales de los Sensores:
+Limpieza básica:</b>
+Enjuaga los sensores con agua destilada o purificada, preferiblemente dispensada desde atomizador, para eliminar residuos ligeros
+
+<b>-Limpieza profunda Sensor de pH:</b> Limpia el sensor frecuentemente para mantener su precisión. Para una limpieza profunda, sumérgelo en solución de limpieza de pH/ORP (HI 70663L) durante 15 minutos y enjuaga con agua destilada. Después, sumerge el sensor en solución de almacenamiento (HI70300) durante al menos una hora antes de realizar nuevas mediciones.
+
+<b>- Evita la Abrasión:</b> No frotes ni utilices materiales ásperos sobre el sensor, ya que podrías dañar el bulbo de vidrio sensible.
+
+<b> Almacenamiento de Sensores-pH:</b> Conserva el sensor de pH en una solución de almacenamiento adecuada (HI70300) cuando no esté en uso, evitando que el sensor se seque y pierda precisión. Si no se usa con frecuencia, verifica el nivel de la solución de almacenamiento al menos una vez por semana.
+
+<b>Nota:</b> * Nunca almacenes el electrodo en agua destilada o desionizada. El capuchón y solución de almacenamiento deben permanecer limpios.
+             * Introduzca aire al capuchón antes de extraerlo de la sonda, para evitar el efecto de succión sobre el tapón de la solución interna.
+             * Evite golpes o caídas, ya que puede generar daños   en la unidad de adquisición de datos del instrumento, sonda y sensores.
+
+
+<b>Limpieza profunda sensor de CE:</b>
+• Limpia el sensor con un cepillo de dientes de cerdas suaves para desprender cualquier residuo.
+• Usa un detergente suave para eliminar las capas aceitosas.
+• Enjuaga con agua purificada después de la limpieza.
+
+
+<b>Se deben tener en cuenta los siguientes aspectos en cuanto al módulo de OD:</b>
+-Para obtener un alto rendimiento, se recomienda reemplazar la membrana cada 2 meses y electrolito mensualmente según las condiciones de la muestra.
+-El cambio de electrolito HI 7042 se debe realizar cada vez que el equipo no calibre, o se identifique inestabilidad de las lecturas. Si no se obtiene resultados óptimos hay que cambiar la membrana.
+-Si el equipo no está en funcionamiento por un periodo de 10 a 15 días, se aconseja retirar la membrana con el electrolito y lavar con abundante agua limpia tanto el sensor como la membrana, por último se instala la tapa de almacenamiento (la que tiene la punta roja), en seco.
+- No utilices el cepillo en la membrana.
+- No Limpies ni toques la punta del sensor.
+
+<b>CAMBIO DE MEMBRANA</b>
+• Desenrosca la membrana girándola en sentido antihorario.
+• Enjuaga una membrana de repuesto con un poco de electrolito mientras la agitas suavemente. Posteriormente inserta el o-ring y rellena con electrolito limpio.
+• Libera las burbujas de la membrana, mediante unos golpes suaves en una superficie plana y limpia, sin afectar o perforar la membrana.
+• Con el sensor hacia abajo, atornilla completamente la tapa en el sentido de las agujas del reloj.
+
+<b>Recalibración:</b> Después de limpiar los sensores, recalibra el instrumento para asegurar mediciones precisas. Emplea soluciones de calibración frescas, si el instrumento no puede calibrarse con sensores limpios, deberás reemplazarlos.
+
+Sensor OPDO
+<b>Limpieza profunda de la Smart Cap:</b>
+• Utiliza un detergente suave y un cepillo de dientes de cerdas suaves  para limpiarla<b>(no el cepillo del kit de mantenimiento)</b>.
+• Enjuaga con agua después de limpiarla y sécala con un pañuelo de laboratorio.
+• Hidrata la Smart Cap en agua purificada antes de usarla. Coloca el sensor en agua purificada durante un mínimo de 8 horas  antes de usarla. Aplica para cuando se instala una Smart cap nueva o después de haberla limpiado.
+
+Las Smart Cap deben reemplazarse anualmente.
+
+<b>Nota: </b> La primera vez que se instala una nueva Smart Cap de OD en un sensor y este se coloca en una sonda y se enciende, la fecha de inicio de la Smart Cap se registrará en la pantalla de estado de la sonda. Después de un año, un mensaje emergente indicará que ha caducado.

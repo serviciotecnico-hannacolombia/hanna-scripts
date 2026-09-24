@@ -1,0 +1,87 @@
+###ESTADO_FISICO_EXTERNO###
+<b>Antecedentes:</b>
+<b>Motivo de ingreso:</b>
+
+
+<b>Medidor (HI 9XXXXX):</b>
+Carcasa:
+Tapa compartimiento de baterías:
+Teclado: (Conmutación)
+         (mascara)
+Protector de pantalla:
+Encendido y visualización:
+Nivel de batería:
+Conector de la sonda:
+Conectores adicionales: (USB)
+                        (RCA)
+Accesorios:
+
+
+<b>Sonda(pH/ISE/ORP/CE XXXX):</b>
+Carcasa:
+Cable:
+Conector:
+Elemento sensitivo:(pH)
+                   (ORP)
+                   (CE)
+                   (ISE)
+                   (T°)
+Unión de referencia:
+Solución interna:
+
+<b>Sonda(temperatura HI 7662):</b>
+Carcasa:
+Cable:
+Conector:
+Elemento sensitivo:
+
+<mark style="background-color: lightgreen;">[OK]</mark>
+<mark style="background-color: orange;">[Atención]</mark>
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###ESTADO_FISICO_INTERNO###
+
+<b>Medidor (HI 9XXXXX):</b>
+
+Compartimiento de baterías:
+Muelles de Contacto de las baterías:
+Carcasa:
+Tarjeta electrónica: (Circuitos)
+                     (componentes)
+                     (Pantalla)
+
+<mark style="background-color: lightgreen;">[OK]</mark>
+<mark style="background-color: orange;">[Atención]</mark>
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###DE ACUERDO CON LOS RESULTADOS OBTENIDOS ¿SE REQUIEREN ACCIONES CORRECTIVAS O PREVENTIVAS?###
+
+Se sometieron los sensores a protocolos de limpieza y acondicionamiento.
+
+###MÉTODO_DE_VERIIFCACIÓN###
+
+Se realiza revisión de las mediciones (de la sonda) empleando soluciones estándar para el ajuste y comprobación de calibración de ( pH,ISE ORP, CE) marca Hanna.
+
+Adicionalmente el medidor es verificado empleando simulador de: (mV(pH)/temperatura)
+                                                                (CE/temperatura)
+
+
+###OBSERVACIONES###
+
+<b>Medidor (HI 9XXXXX):</b>
+<b>Sonda(pH,ISE,ORP,CE XX):</b>
+
+<b>Limpieza y cuidados especiales de los Sensores:
+Limpieza básica:</b>
+Enjuaga los sensores con agua destilada o purificada, preferiblemente dispensada desde atomizador, para eliminar residuos ligeros
+
+<b>-Limpieza profunda Sensor de pH:</b> Limpia el sensor frecuentemente para mantener su precisión. Para una limpieza profunda, sumérgelo en solución de limpieza de pH/ORP (HI 70663L) durante 15 minutos y enjuaga con agua destilada. Después, sumerge el sensor en solución de almacenamiento (HI70300) durante al menos una hora antes de realizar nuevas mediciones.
+
+<b>- Evita la Abrasión:</b> No frotes ni utilices materiales ásperos sobre el sensor, ya que podrías dañar el bulbo de vidrio sensible.
+
+<b> Almacenamiento de Sensores-pH:</b> Conserva el sensor de pH en una solución de almacenamiento adecuada (HI70300) cuando no esté en uso, evitando que el sensor se seque y pierda precisión. Si no se usa con frecuencia, verifica el nivel de la solución de almacenamiento al menos una vez por semana.
+
+<b>Nota:</b> * Nunca almacenes el electrodo en agua destilada o desionizada. El capuchón y solución de almacenamiento deben permanecer limpios.
+             * Introduzca aire al capuchón antes de extraerlo de la sonda, para evitar el efecto de succión sobre el tapón de la solución interna.
+             * Evite golpes o caídas, ya que puede generar daños   en la unidad de adquisición de datos del instrumento, sonda y sensores.
+
