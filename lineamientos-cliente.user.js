@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lineamientos del Cliente - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.1.0
+// @version      1.2.0
 // @description  Muestra los lineamientos especiales del cliente (por NIT), leídos de Google Sheets, debajo de la tarjeta de Estado; y renombra un par de etiquetas de la tabla de detalle. Todo en "Ver Detalle" de la OT.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
@@ -15,7 +15,7 @@
   'use strict';
 
   // Debe coincidir siempre con @version del header de arriba.
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.2.0';
 
   // ─────────────────────────────────────────────
   // CONFIGURACIÓN
@@ -47,8 +47,25 @@
     return;
   }
 
+  // A veces la intranet carga/muestra el NIT con un sufijo extra que NO
+  // corresponde al NIT base del cliente en el Sheet, ej. "860000198.1" o
+  // "860000198-6" en vez de "860000198". Para que igual haga match, se corta
+  // todo lo que venga después del primer "." o "-" ANTES de limpiar el resto
+  // de caracteres no numéricos (así, un NIT normal como "900.947.820" sigue
+  // limpiándose bien, porque ahí el "." es solo separador de miles y no un
+  // sufijo real).
   function normalizarNit(texto) {
-    return (texto || '').replace(/[^\d]/g, '');
+    const t = (texto || '').trim();
+    const corteGuion = t.split('-')[0];
+    const partesPunto = corteGuion.split('.');
+    // Si el primer bloque después de un punto tiene 1 o 2 dígitos, se asume
+    // que es un sufijo (ej. "860000198.1") y no un separador de miles (ej.
+    // "900.947.820", donde cada bloque salvo el primero tiene 3 dígitos).
+    let base = corteGuion;
+    if (partesPunto.length > 1 && /^\d{1,2}$/.test(partesPunto[partesPunto.length - 1])) {
+      base = partesPunto.slice(0, -1).join('.');
+    }
+    return base.replace(/[^\d]/g, '');
   }
 
   // ─────────────────────────────────────────────
