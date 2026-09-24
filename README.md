@@ -167,7 +167,9 @@ Desde v16.3, **Mediciones Iniciales/Finales** funcionan igual de bien si activas
 
 ## Plantillas de "Diagnóstico Preliminar" por tipo de equipo (desde GitHub)
 
-Desde v16.0 (y usando GitHub en vez de Drive desde v16.1), el bloque "Diagnóstico Preliminar" (Estado físico externo/interno, Descripción del procedimiento efectuado, Método de Verificación, Observaciones y recomendaciones) se puede llenar de una sola vez con un botón **"📋 Elegir plantilla de diagnóstico… → ➕ Cargar"**, según el tipo de equipo. A diferencia de Soluciones/Mediciones, aquí **se reemplaza** el contenido de los 5 campos (no se acumula) — es una plantilla completa, no puntos sueltos.
+Desde v16.0 (y usando GitHub en vez de Drive desde v16.1), el bloque "Diagnóstico Preliminar" (Estado físico externo/interno, Descripción del procedimiento efectuado, Método de Verificación, Observaciones y recomendaciones) se puede llenar de una sola vez con un botón **"📋 Elegir plantilla de diagnóstico… → ➕ Cargar"**, según el tipo de equipo.
+
+Desde v16.6, cargar una plantilla **se agrega** al final de lo que ya haya en cada campo (separado por una línea en blanco) — igual que Soluciones/Mediciones — así que se pueden **combinar varias plantillas** en la misma Revisión (por ejemplo, la del medidor + la de la sonda). Debajo del selector aparece un aviso tipo *"Se cargaron: Tester pH/ORP/CE (HI 9XXXX), Oxímetro portátil"* con el nombre de cada una que se haya cargado ahí, en orden. Antes de v16.6 el botón reemplazaba todo el contenido y preguntaba primero si ya había texto — eso ya no aplica.
 
 > **Por qué GitHub y no Google Drive:** se probó primero con links de descarga directa de Drive, pero Drive no permite que un script de OTRO sitio (`intranet.hannacolombia.com`) descargue el archivo — el navegador lo bloquea por CORS, aunque el archivo sea público. GitHub (`raw.githubusercontent.com`) sí lo permite, y ya es la infraestructura que usan los `.user.js` de este mismo repo.
 
@@ -191,8 +193,8 @@ Desde v16.0 (y usando GitHub en vez de Drive desde v16.1), el bloque "Diagnósti
   ...texto...
   ```
 - El script descarga cada `.txt` directo desde `raw.githubusercontent.com/.../main/plantillas-diagnostico/archivo.txt` — funciona en cualquier navegador, sin instalar nada ni compartir/publicar nada aparte.
-- Como una misma página puede tener hasta 5 "Revisión" (Revisión 1, 2, 3...) cada una con su propio Diagnóstico Preliminar, el botón se inyecta **una vez por cada Revisión que actives**, y cada una carga su propia plantilla de forma independiente — cargar una no toca las demás.
-- Si alguno de los 5 campos de esa Revisión ya tiene texto escrito, antes de reemplazarlo te pregunta si estás seguro.
+- Como una misma página puede tener hasta 5 "Revisión" (Revisión 1, 2, 3...) cada una con su propio Diagnóstico Preliminar, el botón se inyecta **una vez por cada Revisión que actives**, y cada una carga sus propias plantillas de forma independiente — cargar una no toca las demás Revisiones.
+- Puedes cargar la misma plantilla más de una vez si lo necesitas (por ejemplo, para repetir un bloque) — no hay advertencia ni bloqueo, simplemente se agrega otra vez debajo.
 - Nota: como este repo es **público**, estas plantillas quedan visibles para cualquiera (igual que los scripts). Son procedimientos técnicos genéricos, no datos de clientes — si en algún momento contienen algo sensible, avisa antes de subirlo así.
 
 ### Agregar un equipo nuevo (guía fácil, sin necesitar saber programar)

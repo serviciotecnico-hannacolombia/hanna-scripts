@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.5
+// @version      16.6
 // @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.5';
+    var APP_VERSION = '16.6';
 
     var columnasPorFilaLecturas = 3;
 
@@ -1066,36 +1066,44 @@
         return secciones;
     }
 
-    // ¿Ya hay algo escrito en alguno de los 5 campos de esta Revisión?
-    function algunCampoDiagnosticoTieneContenido(sufijo) {
-        return CAMPOS_DIAGNOSTICO.some(function(campo) {
-            var el = document.getElementById(campo.idBase + sufijo);
-            return el && el.value.trim() !== '';
-        });
-    }
+    // Guarda, por sufijo de Revisión, la lista de etiquetas de las
+    // plantillas que se han cargado ahí (en el orden en que se cargaron),
+    // para poder mostrar el aviso "Se cargaron: X, Y" y para que sobreviva
+    // a que el panel se vuelva a inyectar (por ejemplo tras un re-render).
+    var plantillasCargadasPorRevision = {};
 
-    // Reemplaza (no acumula) el contenido de los 5 campos de la Revisión
-    // "sufijo" con lo que traiga cada sección de la plantilla. Si a la
-    // plantilla le falta una sección, ese campo se deja tal cual está.
+    // Agrega (NO reemplaza) el contenido de cada sección de la plantilla al
+    // final de lo que ya haya en su campo correspondiente, separado por una
+    // línea en blanco — así se pueden combinar varias plantillas en la
+    // misma Revisión (ej. Medidor + Sonda), igual que ya funciona con
+    // Soluciones/Mediciones. Si a la plantilla le falta una sección, ese
+    // campo se deja tal cual está.
     function cargarPlantillaDiagnostico(sufijo, secciones) {
         CAMPOS_DIAGNOSTICO.forEach(function(campo) {
             var el = document.getElementById(campo.idBase + sufijo);
             if (!el) return;
             var contenido = secciones[campo.clave];
             if (contenido === undefined) return;
-            el.value = contenido;
+            var actual = el.value.trim();
+            el.value = actual ? (actual + '\n\n' + contenido) : contenido;
             dispararEventos(el);
         });
     }
 
     function crearSelectorPlantillaDiagnostico(sufijo) {
+        // Contenedor completo: la fila con el <select> + botón, y debajo el
+        // aviso de qué plantillas se han cargado hasta ahora en esta
+        // Revisión. Se agrupan en un solo div para insertarlos juntos.
+        var contenedorCompleto = document.createElement('div');
+        contenedorCompleto.style.margin = '6px 0';
+        contenedorCompleto.className = 'hanna-panel-inline';
+        contenedorCompleto.dataset.hannaPlantillaBarraSufijo = sufijo;
+
         var barra = document.createElement('div');
         barra.style.display = 'flex';
         barra.style.alignItems = 'center';
         barra.style.gap = '6px';
-        barra.style.margin = '6px 0';
         barra.style.fontFamily = 'Arial, sans-serif';
-        barra.className = 'hanna-panel-inline';
 
         var select = document.createElement('select');
         select.style.fontSize = '12px';
@@ -1131,17 +1139,36 @@
         botonCargar.style.backgroundColor = '#6f42c1';
         botonCargar.style.cursor = 'pointer';
 
+        // Línea chiquita debajo del selector que dice qué plantillas ya se
+        // cargaron en esta Revisión (ej. "Se cargaron: Medidor HI 9XXXX,
+        // Sonda pH/ISE/ORP/CE portátil"). Empieza oculta porque al insertar
+        // el selector todavía no se ha cargado nada.
+        var aviso = document.createElement('div');
+        aviso.style.fontSize = '11px';
+        aviso.style.color = '#6f42c1';
+        aviso.style.marginTop = '4px';
+        aviso.style.fontFamily = 'Arial, sans-serif';
+        aviso.style.display = 'none';
+
+        function actualizarAviso() {
+            var lista = plantillasCargadasPorRevision[sufijo] || [];
+            if (lista.length === 0) {
+                aviso.style.display = 'none';
+                return;
+            }
+            aviso.style.display = 'block';
+            aviso.innerText = (lista.length > 1 ? 'Se cargaron: ' : 'Se cargó: ') + lista.join(', ');
+        }
+
         botonCargar.onclick = function() {
             var clave = select.value;
             if (!clave) { alert('Elige una plantilla primero.'); return; }
             var plantilla = PLANTILLAS_DIAGNOSTICO.filter(function(p) { return p.clave === clave; })[0];
             if (!plantilla) return;
 
-            if (algunCampoDiagnosticoTieneContenido(sufijo)) {
-                var seguro = confirm('Ya hay texto escrito en algunos de los campos de esta Revisión. ¿Reemplazarlo con la plantilla "' + plantilla.etiqueta + '"?');
-                if (!seguro) return;
-            }
-
+            // Ya no se pregunta "¿reemplazar?": cargar ahora AGREGA la
+            // plantilla debajo de lo que ya haya (se pueden combinar varias
+            // en la misma Revisión), en vez de borrar lo existente.
             botonCargar.disabled = true;
             var textoOriginalBoton = botonCargar.innerText;
             botonCargar.innerText = 'Cargando…';
@@ -1149,10 +1176,15 @@
             obtenerTextoPlantilla(plantilla, function(texto) {
                 if (texto) {
                     cargarPlantillaDiagnostico(sufijo, parsearPlantilla(texto));
-                    // Ojo: a propósito NO se limpia el <select> (select.value = '')
-                    // después de cargar. Se deja la opción elegida visible para que
-                    // el técnico vea a simple vista cuál plantilla quedó cargada en
-                    // esta Revisión.
+                    if (!plantillasCargadasPorRevision[sufijo]) plantillasCargadasPorRevision[sufijo] = [];
+                    // Quita el emoji "🧪 " del inicio de la etiqueta para que
+                    // el aviso se lea más limpio en texto corrido.
+                    plantillasCargadasPorRevision[sufijo].push(plantilla.etiqueta.replace(/^\s*\S+\s*/, ''));
+                    actualizarAviso();
+                    // A propósito NO se limpia el <select> (select.value = '')
+                    // después de cargar. Se deja la opción elegida visible
+                    // para que el técnico vea a simple vista cuál fue la
+                    // última plantilla que cargó.
                 }
                 botonCargar.disabled = false;
                 botonCargar.innerText = textoOriginalBoton;
@@ -1161,13 +1193,10 @@
 
         barra.appendChild(select);
         barra.appendChild(botonCargar);
-        // Marca la propia barra con el sufijo de Revisión al que pertenece.
-        // Esto es lo que se usa para detectar duplicados (ver más abajo),
-        // en vez de una bandera puesta sobre el campo de texto: así funciona
-        // aunque el campo termine siendo reemplazado por otro nodo del DOM
-        // (por ejemplo si un editor de texto enriquecido lo reconstruye).
-        barra.dataset.hannaPlantillaBarraSufijo = sufijo;
-        return barra;
+        contenedorCompleto.appendChild(barra);
+        contenedorCompleto.appendChild(aviso);
+        actualizarAviso(); // por si esta Revisión ya tenía plantillas cargadas (re-render)
+        return contenedorCompleto;
     }
 
     // Busca todos los bloques de "Diagnóstico Preliminar" presentes AHORA
