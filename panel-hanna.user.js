@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.2
+// @version      16.3
 // @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.2';
+    var APP_VERSION = '16.3';
 
     var columnasPorFilaLecturas = 3;
 
@@ -259,8 +259,10 @@
         }
     }
 
-    function borrarLecturas() { borrarTablaMediciones(PREFIJO_MEDICIONES_INICIALES); }
-    function borrarMedicionesFinales() { borrarTablaMediciones(PREFIJO_MEDICIONES_FINALES); }
+    // El prefijo puede venir dado (ya con el "[N]" de su Revisión); si no,
+    // se usa el prefijo genérico (compatibilidad con el formato antiguo).
+    function borrarLecturas(prefijoNombre) { borrarTablaMediciones(prefijoNombre || PREFIJO_MEDICIONES_INICIALES); }
+    function borrarMedicionesFinales(prefijoNombre) { borrarTablaMediciones(prefijoNombre || PREFIJO_MEDICIONES_FINALES); }
 
     // Agrega UNA lectura (valor, ayuda, tolerancia) en la primera fila vacía
     // de la tabla de Mediciones indicada, sin borrar lo que ya esté lleno —
@@ -495,9 +497,13 @@
     // solución a la vez, en vez de un combo prearmado en el código.
     var COLUMNAS_POR_SOLUCION = 4; // código, lote, vencimiento, descripción
 
-    function obtenerInputsSoluciones() {
-        var inputs = document.querySelectorAll('input[name^="' + PREFIJO_SOLUCIONES + '"], table input[name*="soluciones"]');
-        if (inputs.length === 0) inputs = document.querySelectorAll('input[type="text"]');
+    // "prefijoNombre" es el prefijo exacto de "name" para UNA Revisión en
+    // particular (ej. "soluciones_codigo[2]"), no el prefijo genérico —
+    // así cada Revisión edita solo sus propios campos, nunca los de otra.
+    function obtenerInputsSoluciones(prefijoNombre) {
+        var prefijo = prefijoNombre || PREFIJO_SOLUCIONES;
+        var inputs = document.querySelectorAll('input[name^="' + prefijo + '"]');
+        if (inputs.length === 0 && !prefijoNombre) inputs = document.querySelectorAll('input[type="text"]');
         return inputs;
     }
 
@@ -506,8 +512,8 @@
         input.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    function agregarSolucionSecuencial(datosFila) {
-        var inputs = obtenerInputsSoluciones();
+    function agregarSolucionSecuencial(prefijoNombre, datosFila) {
+        var inputs = obtenerInputsSoluciones(prefijoNombre);
         if (inputs.length === 0) return alert('No se encontraron campos de soluciones.');
 
         var totalFilas = Math.floor(inputs.length / COLUMNAS_POR_SOLUCION);
@@ -524,8 +530,8 @@
         alert('Ya no hay espacio libre en la tabla de Soluciones Estándar. Borra alguna fila antes de agregar otra.');
     }
 
-    function borrarSolucionesSecuencial() {
-        var inputs = obtenerInputsSoluciones();
+    function borrarSolucionesSecuencial(prefijoNombre) {
+        var inputs = obtenerInputsSoluciones(prefijoNombre);
         for (var i = 0; i < inputs.length; i++) {
             inputs[i].value = '';
             dispararEventos(inputs[i]);
@@ -534,8 +540,8 @@
 
     // Borra solo los 4 campos de UNA fila (código, lote, vencimiento,
     // descripción), identificada por el índice de su primer campo.
-    function borrarFilaSolucion(base) {
-        var inputs = obtenerInputsSoluciones();
+    function borrarFilaSolucion(prefijoNombre, base) {
+        var inputs = obtenerInputsSoluciones(prefijoNombre);
         for (var c = 0; c < COLUMNAS_POR_SOLUCION; c++) {
             if (inputs[base + c]) {
                 inputs[base + c].value = '';
@@ -548,8 +554,8 @@
     // al menos un campo lleno, un pequeño botón "✖" para borrar solo esa
     // fila. El botón aparece/desaparece solo según si la fila tiene datos
     // (ya sea porque el técnico la llenó a mano o por el menú de arriba).
-    function inyectarBotonesLimpiarFila() {
-        var inputs = obtenerInputsSoluciones();
+    function inyectarBotonesLimpiarFila(prefijoNombre) {
+        var inputs = obtenerInputsSoluciones(prefijoNombre);
         var totalFilas = Math.floor(inputs.length / COLUMNAS_POR_SOLUCION);
 
         for (var fila = 0; fila < totalFilas; fila++) {
@@ -583,7 +589,7 @@
                 }
 
                 boton.onclick = function() {
-                    borrarFilaSolucion(baseFila);
+                    borrarFilaSolucion(prefijoNombre, baseFila);
                     actualizarVisibilidad();
                 };
 
@@ -677,27 +683,59 @@
         return true;
     }
 
-    var controlesInyectados = { iniciales: false, finales: false, soluciones: false, badge: false };
-    var panelSolucionesRef = null; // { poblar } del panel de checkboxes de Soluciones Estándar, para poder refrescarlo
-    var panelLecturasIniRef = null; // { poblar } del panel de checkboxes de Mediciones Iniciales
-    var panelLecturasFinRef = null; // { poblar } del panel de checkboxes de Mediciones Finales
+    // Antes eran banderas simples (true/false, una sola vez para toda la
+    // página). Ahora son objetos { "1": true, "2": true, ... } porque una
+    // misma página puede tener hasta 5 "Informe de Revisión" y cada uno
+    // necesita su propio panel — igual que ya pasaba con Diagnóstico
+    // Preliminar.
+    var controlesInyectados = { iniciales: {}, finales: {}, soluciones: {}, badge: false };
+    var panelesSolucionesRef = []; // { poblar } de cada panel de checkboxes de Soluciones Estándar (uno por Revisión), para poder refrescarlos
+    var panelesLecturasIniRef = []; // { poblar } de cada panel de checkboxes de Mediciones Iniciales
+    var panelesLecturasFinRef = []; // { poblar } de cada panel de checkboxes de Mediciones Finales
 
-    // Vuelve a construir la lista del panel de Soluciones Estándar con lo
-    // último que haya en datosSheet. Se llama tras cada carga/recarga del
-    // Sheet (si el panel todavía no existe en el DOM, no hace nada: cuando se
-    // inyecte usará datosSheet ya actualizado).
+    // Vuelve a construir la lista de TODOS los paneles de Soluciones Estándar
+    // (uno por Revisión) con lo último que haya en datosSheet. Se llama tras
+    // cada carga/recarga del Sheet (si un panel todavía no existe en el DOM,
+    // no hace nada: cuando se inyecte usará datosSheet ya actualizado).
     function refrescarMenuSoluciones() {
-        if (!panelSolucionesRef) return;
-        panelSolucionesRef.poblar(construirOpcionesSolucionesDesdeSheet());
+        var opciones = construirOpcionesSolucionesDesdeSheet();
+        panelesSolucionesRef.forEach(function(panel) { panel.poblar(opciones); });
     }
 
-    // Igual que refrescarMenuSoluciones, pero para los dos paneles de
-    // Mediciones (Iniciales y Finales), con lo último que haya en
+    // Igual que refrescarMenuSoluciones, pero para los paneles de Mediciones
+    // (Iniciales y Finales) de cada Revisión, con lo último que haya en
     // datosLecturas.
     function refrescarMenuLecturas() {
         var opciones = construirOpcionesLecturasDesdeSheet();
-        if (panelLecturasIniRef) panelLecturasIniRef.poblar(opciones);
-        if (panelLecturasFinRef) panelLecturasFinRef.poblar(opciones);
+        panelesLecturasIniRef.forEach(function(panel) { panel.poblar(opciones); });
+        panelesLecturasFinRef.forEach(function(panel) { panel.poblar(opciones); });
+    }
+
+    // Encuentra, para un campo tipo "mediciones_iniciales", todas las
+    // Revisiones presentes AHORA MISMO en la página y el prefijo exacto de
+    // "name" que hay que usar para cada una.
+    //
+    // El sitio nombra los campos de una Revisión "N" como
+    // "mediciones_iniciales[N][fila][columna]" (confirmado inspeccionando un
+    // campo real de la Revisión 2: name="mediciones_iniciales[2][1][1]"). Si
+    // por algún motivo un campo no trae ese "[N]" (formato antiguo, sin
+    // Revisiones), se lo cuenta como Revisión "1" usando el prefijo plano,
+    // para no dejar de funcionar en ese caso.
+    //
+    // Devuelve un objeto { "1": "mediciones_iniciales[1]", "2": "mediciones_iniciales[2]", ... }
+    // (o { "1": "mediciones_iniciales" } si no hay corchetes de Revisión).
+    function extraerPrefijosPorRevision(prefijoBase) {
+        var mapa = {};
+        var regexRevision = new RegExp('^(' + prefijoBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\[(\\d+)\\])');
+        document.querySelectorAll('input[name^="' + prefijoBase + '"]').forEach(function(input) {
+            var m = input.name.match(regexRevision);
+            if (m) {
+                mapa[m[2]] = m[1];
+            } else if (!mapa['1']) {
+                mapa['1'] = prefijoBase;
+            }
+        });
+        return mapa;
     }
 
     // Panel de checkboxes para elegir varios ítems de una lista de una vez
@@ -854,83 +892,92 @@
         return { barra: barra, poblar: poblar };
     }
 
-    function intentarInyectarControles() {
-        if (!controlesInyectados.iniciales) {
-            var refIni = document.querySelector('input[name^="' + PREFIJO_MEDICIONES_INICIALES + '"]');
-            if (refIni) {
-                var panelIni = crearPanelChecklist(construirOpcionesLecturasDesdeSheet(), '#17a2b8', '🧪 Elegir Mediciones Iniciales…', function(clavesSeleccionadas) {
-                    clavesSeleccionadas.forEach(function(clave) {
-                        var fila = datosLecturas[Number(clave)];
-                        if (!fila) return;
-                        agregarLecturaSecuencial(PREFIJO_MEDICIONES_INICIALES, [fila.valor, fila.ayuda, fila.tolerancia]);
-                    });
+    // Inyecta el panel de Mediciones Iniciales/Finales para CADA Revisión
+    // presente en la página que todavía no lo tenga. "tipo" es 'iniciales' o
+    // 'finales' (clave dentro de controlesInyectados/las listas de refs);
+    // "prefijoBase" es el nombre base del campo ("mediciones_iniciales" o
+    // "mediciones_finales"); "colorBorde"/"etiquetaBoton" son de estilo, y
+    // "listaRefs" es el arreglo (panelesLecturasIniRef o …FinRef) donde se
+    // guarda cada panel para poder refrescarlo luego.
+    function inyectarPanelesLecturas(tipo, prefijoBase, colorBorde, etiquetaBoton, listaRefs, funcionBorrarTabla) {
+        var prefijosPorRevision = extraerPrefijosPorRevision(prefijoBase);
+        var revisiones = Object.keys(prefijosPorRevision);
+        var multiplesRevisiones = revisiones.length > 1;
+
+        revisiones.forEach(function(rev) {
+            if (controlesInyectados[tipo][rev]) return;
+            var prefijoRevision = prefijosPorRevision[rev];
+            var refCampo = document.querySelector('input[name^="' + prefijoRevision + '"]');
+            if (!refCampo) return;
+
+            var etiqueta = multiplesRevisiones ? (etiquetaBoton + ' (Revisión ' + rev + ')') : etiquetaBoton;
+            var panel = crearPanelChecklist(construirOpcionesLecturasDesdeSheet(), colorBorde, etiqueta, function(clavesSeleccionadas) {
+                clavesSeleccionadas.forEach(function(clave) {
+                    var fila = datosLecturas[Number(clave)];
+                    if (!fila) return;
+                    agregarLecturaSecuencial(prefijoRevision, [fila.valor, fila.ayuda, fila.tolerancia]);
                 });
-                panelLecturasIniRef = panelIni;
+            });
+            listaRefs.push(panel);
 
-                var filaBotonesIni = panelIni.barra.firstChild;
-                filaBotonesIni.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Mediciones Iniciales', '#17a2b8', borrarLecturas));
+            var filaBotones = panel.barra.firstChild;
+            filaBotones.appendChild(crearBotonIcono('🗑️', 'Borrar esta tabla de Mediciones', colorBorde, function() { funcionBorrarTabla(prefijoRevision); }));
 
-                if (anclarAntesDeTabla(refIni, panelIni.barra)) {
-                    controlesInyectados.iniciales = true;
-                    inyectarBotonesLimpiarFilaLecturas(PREFIJO_MEDICIONES_INICIALES);
-                    inyectarBotonesEstadoLecturas(PREFIJO_MEDICIONES_INICIALES);
-                }
+            if (anclarAntesDeTabla(refCampo, panel.barra)) {
+                controlesInyectados[tipo][rev] = true;
+                inyectarBotonesLimpiarFilaLecturas(prefijoRevision);
+                inyectarBotonesEstadoLecturas(prefijoRevision);
             }
-        }
-
-        if (!controlesInyectados.finales) {
-            var refFin = document.querySelector('input[name^="' + PREFIJO_MEDICIONES_FINALES + '"]');
-            if (refFin) {
-                var panelFin = crearPanelChecklist(construirOpcionesLecturasDesdeSheet(), '#17a2b8', '🧪 Elegir Mediciones Finales…', function(clavesSeleccionadas) {
-                    clavesSeleccionadas.forEach(function(clave) {
-                        var fila = datosLecturas[Number(clave)];
-                        if (!fila) return;
-                        agregarLecturaSecuencial(PREFIJO_MEDICIONES_FINALES, [fila.valor, fila.ayuda, fila.tolerancia]);
-                    });
-                });
-                panelLecturasFinRef = panelFin;
-
-                var filaBotonesFin = panelFin.barra.firstChild;
-                filaBotonesFin.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Mediciones Finales', '#17a2b8', borrarMedicionesFinales));
-
-                if (anclarAntesDeTabla(refFin, panelFin.barra)) {
-                    controlesInyectados.finales = true;
-                    inyectarBotonesLimpiarFilaLecturas(PREFIJO_MEDICIONES_FINALES);
-                    inyectarBotonesEstadoLecturas(PREFIJO_MEDICIONES_FINALES);
-                }
-            }
-        }
-
-        if (!controlesInyectados.soluciones) {
-            var refSol = document.querySelector('input[name^="' + PREFIJO_SOLUCIONES + '"]');
-            if (refSol) {
-                var panelSol = crearPanelChecklist(construirOpcionesSolucionesDesdeSheet(), '#28a745', '🧴 Elegir Soluciones Estándar…', function(clavesSeleccionadas) {
-                    clavesSeleccionadas.forEach(function(clave) {
-                        var fila = datosSheet[Number(clave)];
-                        if (!fila) return;
-                        agregarSolucionSecuencial([fila.codigo, fila.lote, fila.venc, fila.desc]);
-                    });
-                });
-                panelSolucionesRef = panelSol;
-
-                var filaBotonesSol = panelSol.barra.firstChild; // la fila con el botón "Elegir…"
-                filaBotonesSol.appendChild(crearBotonIcono('🗑️', 'Borrar tabla de Soluciones Estándar', '#28a745', borrarSolucionesSecuencial));
-                filaBotonesSol.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de lotes/vencimientos', '#28a745', abrirEditorSheet));
-
-                if (anclarAntesDeTabla(refSol, panelSol.barra)) {
-                    controlesInyectados.soluciones = true;
-                    inyectarBotonesLimpiarFila();
-                }
-            }
-        }
-
-        intentarInyectarBadge();
-
-        if (controlesInyectados.iniciales && controlesInyectados.finales && controlesInyectados.soluciones && controlesInyectados.badge && observadorDOM) {
-            observadorDOM.disconnect();
-        }
+        });
     }
 
+    // Igual que inyectarPanelesLecturas, pero para Soluciones Estándar
+    // (4 columnas por fila en vez de 3, y sus propios botones ✖/✏️).
+    function inyectarPanelesSoluciones() {
+        var prefijosPorRevision = extraerPrefijosPorRevision(PREFIJO_SOLUCIONES);
+        var revisiones = Object.keys(prefijosPorRevision);
+        var multiplesRevisiones = revisiones.length > 1;
+
+        revisiones.forEach(function(rev) {
+            if (controlesInyectados.soluciones[rev]) return;
+            var prefijoRevision = prefijosPorRevision[rev];
+            var refCampo = document.querySelector('input[name^="' + prefijoRevision + '"]');
+            if (!refCampo) return;
+
+            var etiqueta = multiplesRevisiones ? ('🧴 Elegir Soluciones Estándar… (Revisión ' + rev + ')') : '🧴 Elegir Soluciones Estándar…';
+            var panel = crearPanelChecklist(construirOpcionesSolucionesDesdeSheet(), '#28a745', etiqueta, function(clavesSeleccionadas) {
+                clavesSeleccionadas.forEach(function(clave) {
+                    var fila = datosSheet[Number(clave)];
+                    if (!fila) return;
+                    agregarSolucionSecuencial(prefijoRevision, [fila.codigo, fila.lote, fila.venc, fila.desc]);
+                });
+            });
+            panelesSolucionesRef.push(panel);
+
+            var filaBotonesSol = panel.barra.firstChild; // la fila con el botón "Elegir…"
+            filaBotonesSol.appendChild(crearBotonIcono('🗑️', 'Borrar esta tabla de Soluciones Estándar', '#28a745', function() { borrarSolucionesSecuencial(prefijoRevision); }));
+            filaBotonesSol.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de lotes/vencimientos', '#28a745', abrirEditorSheet));
+
+            if (anclarAntesDeTabla(refCampo, panel.barra)) {
+                controlesInyectados.soluciones[rev] = true;
+                inyectarBotonesLimpiarFila(prefijoRevision);
+            }
+        });
+    }
+
+    function intentarInyectarControles() {
+        inyectarPanelesLecturas('iniciales', PREFIJO_MEDICIONES_INICIALES, '#17a2b8', '🧪 Elegir Mediciones Iniciales…', panelesLecturasIniRef, borrarLecturas);
+        inyectarPanelesLecturas('finales', PREFIJO_MEDICIONES_FINALES, '#17a2b8', '🧪 Elegir Mediciones Finales…', panelesLecturasFinRef, borrarMedicionesFinales);
+        inyectarPanelesSoluciones();
+
+        intentarInyectarBadge();
+    }
+
+    // Este observer ya NO se desconecta solo: como el técnico puede activar
+    // una nueva "Revisión" (con sus propias tablas de Mediciones/Soluciones)
+    // en cualquier momento mientras trabaja en la página, hay que seguir
+    // vigilando todo el tiempo — mismo criterio que ya se usa para las
+    // plantillas de Diagnóstico Preliminar más abajo.
     var observadorDOM = new MutationObserver(function() { intentarInyectarControles(); });
     observadorDOM.observe(document.body, { childList: true, subtree: true });
 
@@ -1156,9 +1203,9 @@
     // Aviso único en consola (5s tras cargar) para depurar campos que nunca aparecieron.
     setTimeout(function() {
         var faltantes = [];
-        if (!controlesInyectados.iniciales) faltantes.push(PREFIJO_MEDICIONES_INICIALES);
-        if (!controlesInyectados.finales) faltantes.push(PREFIJO_MEDICIONES_FINALES);
-        if (!controlesInyectados.soluciones) faltantes.push(PREFIJO_SOLUCIONES);
+        if (Object.keys(controlesInyectados.iniciales).length === 0) faltantes.push(PREFIJO_MEDICIONES_INICIALES);
+        if (Object.keys(controlesInyectados.finales).length === 0) faltantes.push(PREFIJO_MEDICIONES_FINALES);
+        if (Object.keys(controlesInyectados.soluciones).length === 0) faltantes.push(PREFIJO_SOLUCIONES);
         if (!controlesInyectados.badge) faltantes.push('encabezado "Informe" (para la insignia de versión)');
         if (faltantes.length > 0) {
             console.warn('[Panel Hanna] No se encontraron todavía estos elementos en la página (puede ser normal si el "Tipo de Informe" aún no se seleccionó): ' + faltantes.join(', '));
