@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.4
+// @version      16.5
 // @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.4';
+    var APP_VERSION = '16.5';
 
     var columnasPorFilaLecturas = 3;
 
@@ -497,13 +497,22 @@
     // solución a la vez, en vez de un combo prearmado en el código.
     var COLUMNAS_POR_SOLUCION = 4; // código, lote, vencimiento, descripción
 
-    // "prefijoNombre" es el prefijo exacto de "name" para UNA Revisión en
-    // particular (ej. "soluciones_codigo[2]"), no el prefijo genérico —
-    // así cada Revisión edita solo sus propios campos, nunca los de otra.
-    function obtenerInputsSoluciones(prefijoNombre) {
-        var prefijo = prefijoNombre || PREFIJO_SOLUCIONES;
-        var inputs = document.querySelectorAll('input[name^="' + prefijo + '"]');
-        if (inputs.length === 0 && !prefijoNombre) inputs = document.querySelectorAll('input[type="text"]');
+    // OJO: a diferencia de Mediciones (donde código/lote/vencimiento/desc.
+    // SÍ comparten un mismo prefijo de "name" con un índice de Revisión,
+    // confirmado con datos reales: "mediciones_iniciales[2][1][1]"), en
+    // Soluciones Estándar cada COLUMNA es un campo con su propio nombre —
+    // solo "Código" empieza con "soluciones_codigo" (confirmado con datos
+    // reales: "soluciones_codigo[1][1]", "soluciones_codigo[1][2]" son dos
+    // valores apilados de la MISMA columna "Código", no dos columnas
+    // distintas). Por eso el selector tiene que ser más amplio: cualquier
+    // input dentro de una tabla cuyo "name" contenga "soluciones" en algún
+    // lado, para agarrar también Lote/Vencimiento/Descripción aunque no se
+    // llamen "soluciones_codigo". No se sabe (todavía) si esta sección se
+    // repite por Revisión igual que Mediciones, así que por ahora sigue
+    // siendo un único panel para toda la página, como en v16.1 y antes.
+    function obtenerInputsSoluciones() {
+        var inputs = document.querySelectorAll('input[name^="' + PREFIJO_SOLUCIONES + '"], table input[name*="soluciones"]');
+        if (inputs.length === 0) inputs = document.querySelectorAll('input[type="text"]');
         return inputs;
     }
 
@@ -512,8 +521,8 @@
         input.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    function agregarSolucionSecuencial(prefijoNombre, datosFila) {
-        var inputs = obtenerInputsSoluciones(prefijoNombre);
+    function agregarSolucionSecuencial(datosFila) {
+        var inputs = obtenerInputsSoluciones();
         if (inputs.length === 0) return alert('No se encontraron campos de soluciones.');
 
         var totalFilas = Math.floor(inputs.length / COLUMNAS_POR_SOLUCION);
@@ -530,8 +539,8 @@
         alert('Ya no hay espacio libre en la tabla de Soluciones Estándar. Borra alguna fila antes de agregar otra.');
     }
 
-    function borrarSolucionesSecuencial(prefijoNombre) {
-        var inputs = obtenerInputsSoluciones(prefijoNombre);
+    function borrarSolucionesSecuencial() {
+        var inputs = obtenerInputsSoluciones();
         for (var i = 0; i < inputs.length; i++) {
             inputs[i].value = '';
             dispararEventos(inputs[i]);
@@ -540,8 +549,8 @@
 
     // Borra solo los 4 campos de UNA fila (código, lote, vencimiento,
     // descripción), identificada por el índice de su primer campo.
-    function borrarFilaSolucion(prefijoNombre, base) {
-        var inputs = obtenerInputsSoluciones(prefijoNombre);
+    function borrarFilaSolucion(base) {
+        var inputs = obtenerInputsSoluciones();
         for (var c = 0; c < COLUMNAS_POR_SOLUCION; c++) {
             if (inputs[base + c]) {
                 inputs[base + c].value = '';
@@ -554,8 +563,8 @@
     // al menos un campo lleno, un pequeño botón "✖" para borrar solo esa
     // fila. El botón aparece/desaparece solo según si la fila tiene datos
     // (ya sea porque el técnico la llenó a mano o por el menú de arriba).
-    function inyectarBotonesLimpiarFila(prefijoNombre) {
-        var inputs = obtenerInputsSoluciones(prefijoNombre);
+    function inyectarBotonesLimpiarFila() {
+        var inputs = obtenerInputsSoluciones();
         var totalFilas = Math.floor(inputs.length / COLUMNAS_POR_SOLUCION);
 
         for (var fila = 0; fila < totalFilas; fila++) {
@@ -589,7 +598,7 @@
                 }
 
                 boton.onclick = function() {
-                    borrarFilaSolucion(prefijoNombre, baseFila);
+                    borrarFilaSolucion(baseFila);
                     actualizarVisibilidad();
                 };
 
@@ -931,38 +940,36 @@
         });
     }
 
-    // Igual que inyectarPanelesLecturas, pero para Soluciones Estándar
-    // (4 columnas por fila en vez de 3, y sus propios botones ✖/✏️).
+    // A diferencia de Mediciones, Soluciones Estándar todavía se maneja
+    // como UN SOLO panel para toda la página (ver la nota en
+    // obtenerInputsSoluciones): sus 4 columnas no comparten un prefijo con
+    // número de Revisión como sí pasa en Mediciones, así que por ahora no
+    // se sabe repartir por Revisión sin arriesgarse a mezclar datos. Si en
+    // el futuro se confirma que esta sección SÍ se repite por Revisión (con
+    // un patrón de "name" identificable), se puede generalizar igual que
+    // inyectarPanelesLecturas.
     function inyectarPanelesSoluciones() {
-        var prefijosPorRevision = extraerPrefijosPorRevision(PREFIJO_SOLUCIONES);
-        var revisiones = Object.keys(prefijosPorRevision);
-        var multiplesRevisiones = revisiones.length > 1;
+        if (controlesInyectados.soluciones['1']) return;
+        var refCampo = document.querySelector('input[name^="' + PREFIJO_SOLUCIONES + '"]');
+        if (!refCampo) return;
 
-        revisiones.forEach(function(rev) {
-            if (controlesInyectados.soluciones[rev]) return;
-            var prefijoRevision = prefijosPorRevision[rev];
-            var refCampo = document.querySelector('input[name^="' + prefijoRevision + '"]');
-            if (!refCampo) return;
-
-            var etiqueta = multiplesRevisiones ? ('🧴 Elegir Soluciones Estándar… (Revisión ' + rev + ')') : '🧴 Elegir Soluciones Estándar…';
-            var panel = crearPanelChecklist(construirOpcionesSolucionesDesdeSheet(), '#28a745', etiqueta, function(clavesSeleccionadas) {
-                clavesSeleccionadas.forEach(function(clave) {
-                    var fila = datosSheet[Number(clave)];
-                    if (!fila) return;
-                    agregarSolucionSecuencial(prefijoRevision, [fila.codigo, fila.lote, fila.venc, fila.desc]);
-                });
+        var panel = crearPanelChecklist(construirOpcionesSolucionesDesdeSheet(), '#28a745', '🧴 Elegir Soluciones Estándar…', function(clavesSeleccionadas) {
+            clavesSeleccionadas.forEach(function(clave) {
+                var fila = datosSheet[Number(clave)];
+                if (!fila) return;
+                agregarSolucionSecuencial([fila.codigo, fila.lote, fila.venc, fila.desc]);
             });
-            panelesSolucionesRef.push(panel);
-
-            var filaBotonesSol = panel.barra.firstChild; // la fila con el botón "Elegir…"
-            filaBotonesSol.appendChild(crearBotonIcono('🗑️', 'Borrar esta tabla de Soluciones Estándar', '#28a745', function() { borrarSolucionesSecuencial(prefijoRevision); }));
-            filaBotonesSol.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de lotes/vencimientos', '#28a745', abrirEditorSheet));
-
-            if (anclarAntesDeTabla(refCampo, panel.barra)) {
-                controlesInyectados.soluciones[rev] = true;
-                inyectarBotonesLimpiarFila(prefijoRevision);
-            }
         });
+        panelesSolucionesRef.push(panel);
+
+        var filaBotonesSol = panel.barra.firstChild; // la fila con el botón "Elegir…"
+        filaBotonesSol.appendChild(crearBotonIcono('🗑️', 'Borrar la tabla de Soluciones Estándar', '#28a745', borrarSolucionesSecuencial));
+        filaBotonesSol.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de lotes/vencimientos', '#28a745', abrirEditorSheet));
+
+        if (anclarAntesDeTabla(refCampo, panel.barra)) {
+            controlesInyectados.soluciones['1'] = true;
+            inyectarBotonesLimpiarFila();
+        }
     }
 
     function intentarInyectarControles() {
