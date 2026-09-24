@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      15.1
-// @description  Panel completo con Mediciones (Iniciales/Finales) y Soluciones Estándar 100% dinámicas desde Google Sheets, con paneles de checkboxes agrupados y marcador de resultado (✔/✘/Inestable)
+// @version      16.0
+// @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde Google Drive
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
 // @grant        none
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '15.1';
+    var APP_VERSION = '16.0';
 
     var columnasPorFilaLecturas = 3;
 
@@ -933,6 +933,195 @@
 
     var observadorDOM = new MutationObserver(function() { intentarInyectarControles(); });
     observadorDOM.observe(document.body, { childList: true, subtree: true });
+
+    // ==========================================
+    // 4. PLANTILLAS DE "DIAGNÓSTICO PRELIMINAR" DESDE ARCHIVOS .TXT EN GOOGLE DRIVE
+    // ==========================================
+    // Cada plantilla es un .txt con 5 secciones marcadas con "###NOMBRE###",
+    // una por cada campo del bloque "Diagnóstico Preliminar". El técnico elige
+    // el tipo de equipo en un desplegable y el texto de cada sección reemplaza
+    // el contenido del campo correspondiente (no se acumula, a diferencia de
+    // Soluciones/Mediciones).
+    //
+    // Esta sección puede tener hasta 5 "Revisión" en la misma página
+    // (Revisión 1, 2, 3...), cada una con su propio juego de 5 campos cuyo id
+    // termina en "-1", "-2", etc. Por eso los campos se ubican por PATRÓN de
+    // id (prefijo + número de revisión), nunca por un id fijo.
+
+    var PLANTILLAS_DIAGNOSTICO = [
+        { clave: 'tester_ph_orp_ce', etiqueta: '🧪 Tester pH/ORP/CE (HI 9XXXX)', url: 'https://drive.google.com/uc?export=download&id=1p2oBusPVja3tGjeW0Tw37p_5Iur-LGy1' },
+        { clave: 'multiparametro_sobremesa', etiqueta: '🧪 Multiparámetro de sobremesa', url: 'https://drive.google.com/uc?export=download&id=1ImM7UVKMoINJRFGtw6_2ZvqfN06N35Wn' },
+        { clave: 'multiparametro_portatil', etiqueta: '🧪 Multiparámetro portátil (HI 98XXX)', url: 'https://drive.google.com/uc?export=download&id=1tG12mRViY1J2qsfaVlaXY4IqFSc1QDsO' },
+        { clave: 'ph_ise_orp_ce_portatil', etiqueta: '🧪 pH/ISE/ORP/CE portátil', url: 'https://drive.google.com/uc?export=download&id=1llggro6EadrBRW_LtlT3RYN1kWdF470Y' },
+        { clave: 'oximetro_portatil', etiqueta: '🧪 Oxímetro portátil', url: 'https://drive.google.com/uc?export=download&id=1pDjmn_KBdzv1gut6HMJTBqK-lwgb-jaj' }
+    ];
+
+    // idBase + sufijo ("1", "2"...) = id real del campo en esa Revisión.
+    var CAMPOS_DIAGNOSTICO = [
+        { clave: 'ESTADO_FISICO_EXTERNO', idBase: 'edit-diagnostico-preliminar-estado-fisico-externo-' },
+        { clave: 'ESTADO_FISICO_INTERNO', idBase: 'edit-diagnostico-preliminar-estado-fisico-interno-' },
+        { clave: 'DE ACUERDO CON LOS RESULTADOS OBTENIDOS ¿SE REQUIEREN ACCIONES CORRECTIVAS O PREVENTIVAS?', idBase: 'diagnostico_preliminar_procedimiento_efectuado_' },
+        { clave: 'MÉTODO_DE_VERIIFCACIÓN', idBase: 'edit-metodo-verificacion-' },
+        { clave: 'OBSERVACIONES', idBase: 'edit-observaciones-recomendaciones-' }
+    ];
+
+    var ID_BASE_ESTADO_EXTERNO = CAMPOS_DIAGNOSTICO[0].idBase; // sirve para detectar cuántas Revisiones hay
+
+    // Descarga el .txt de la plantilla (sin caché de navegador) y, si falla,
+    // usa la última copia guardada en localStorage.
+    function obtenerTextoPlantilla(plantilla, callback) {
+        var cacheKey = 'hanna_plantilla_cache_' + plantilla.clave;
+        fetch(plantilla.url, { cache: 'no-store' })
+            .then(function(r) { return r.text(); })
+            .then(function(texto) {
+                try { localStorage.setItem(cacheKey, texto); } catch (e) { /* sin cache, no pasa nada */ }
+                callback(texto);
+            })
+            .catch(function(err) {
+                console.warn('[Panel Hanna] No se pudo descargar la plantilla "' + plantilla.etiqueta + '".', err);
+                var cache = null;
+                try { cache = localStorage.getItem(cacheKey); } catch (e) { /* nada que usar */ }
+                if (cache) {
+                    callback(cache);
+                } else {
+                    alert('No se pudo descargar la plantilla "' + plantilla.etiqueta + '" y no hay una copia guardada localmente. Revisa tu conexión e intenta de nuevo.');
+                }
+            });
+    }
+
+    // Parte el texto de la plantilla en un objeto { NOMBRE_SECCION: contenido },
+    // usando "###NOMBRE###" (solo en su propia línea) como separador.
+    function parsearPlantilla(texto) {
+        var secciones = {};
+        var partes = (texto || '').replace(/\r\n/g, '\n').split(/^###(.+?)###[ \t]*$/m);
+        for (var i = 1; i < partes.length; i += 2) {
+            var nombre = (partes[i] || '').trim().toUpperCase();
+            secciones[nombre] = (partes[i + 1] || '').trim();
+        }
+        return secciones;
+    }
+
+    // ¿Ya hay algo escrito en alguno de los 5 campos de esta Revisión?
+    function algunCampoDiagnosticoTieneContenido(sufijo) {
+        return CAMPOS_DIAGNOSTICO.some(function(campo) {
+            var el = document.getElementById(campo.idBase + sufijo);
+            return el && el.value.trim() !== '';
+        });
+    }
+
+    // Reemplaza (no acumula) el contenido de los 5 campos de la Revisión
+    // "sufijo" con lo que traiga cada sección de la plantilla. Si a la
+    // plantilla le falta una sección, ese campo se deja tal cual está.
+    function cargarPlantillaDiagnostico(sufijo, secciones) {
+        CAMPOS_DIAGNOSTICO.forEach(function(campo) {
+            var el = document.getElementById(campo.idBase + sufijo);
+            if (!el) return;
+            var contenido = secciones[campo.clave];
+            if (contenido === undefined) return;
+            el.value = contenido;
+            dispararEventos(el);
+        });
+    }
+
+    function crearSelectorPlantillaDiagnostico(sufijo) {
+        var barra = document.createElement('div');
+        barra.style.display = 'flex';
+        barra.style.alignItems = 'center';
+        barra.style.gap = '6px';
+        barra.style.margin = '6px 0';
+        barra.style.fontFamily = 'Arial, sans-serif';
+        barra.className = 'hanna-panel-inline';
+
+        var select = document.createElement('select');
+        select.style.fontSize = '12px';
+        select.style.padding = '4px 6px';
+        select.style.borderRadius = '4px';
+        select.style.border = '1px solid #6f42c1';
+        select.style.color = '#495057';
+        select.style.backgroundColor = '#fff';
+        select.style.maxWidth = '320px';
+
+        var optPlaceholder = document.createElement('option');
+        optPlaceholder.textContent = '📋 Elegir plantilla de diagnóstico…';
+        optPlaceholder.value = '';
+        optPlaceholder.disabled = true;
+        optPlaceholder.selected = true;
+        select.appendChild(optPlaceholder);
+
+        PLANTILLAS_DIAGNOSTICO.forEach(function(plantilla) {
+            var op = document.createElement('option');
+            op.textContent = plantilla.etiqueta;
+            op.value = plantilla.clave;
+            select.appendChild(op);
+        });
+
+        var botonCargar = document.createElement('button');
+        botonCargar.type = 'button';
+        botonCargar.innerText = '➕ Cargar';
+        botonCargar.style.fontSize = '12px';
+        botonCargar.style.padding = '5px 10px';
+        botonCargar.style.borderRadius = '4px';
+        botonCargar.style.border = '1px solid #6f42c1';
+        botonCargar.style.color = '#fff';
+        botonCargar.style.backgroundColor = '#6f42c1';
+        botonCargar.style.cursor = 'pointer';
+
+        botonCargar.onclick = function() {
+            var clave = select.value;
+            if (!clave) { alert('Elige una plantilla primero.'); return; }
+            var plantilla = PLANTILLAS_DIAGNOSTICO.filter(function(p) { return p.clave === clave; })[0];
+            if (!plantilla) return;
+
+            if (algunCampoDiagnosticoTieneContenido(sufijo)) {
+                var seguro = confirm('Ya hay texto escrito en algunos de los campos de esta Revisión. ¿Reemplazarlo con la plantilla "' + plantilla.etiqueta + '"?');
+                if (!seguro) return;
+            }
+
+            botonCargar.disabled = true;
+            var textoOriginalBoton = botonCargar.innerText;
+            botonCargar.innerText = 'Cargando…';
+
+            obtenerTextoPlantilla(plantilla, function(texto) {
+                cargarPlantillaDiagnostico(sufijo, parsearPlantilla(texto));
+                botonCargar.disabled = false;
+                botonCargar.innerText = textoOriginalBoton;
+                select.value = '';
+            });
+        };
+
+        barra.appendChild(select);
+        barra.appendChild(botonCargar);
+        return barra;
+    }
+
+    // Busca todos los bloques de "Diagnóstico Preliminar" presentes AHORA
+    // MISMO en la página (uno por cada Revisión activada) y le agrega su
+    // propio selector de plantilla al que todavía no lo tenga.
+    var revisionesConSelectorPlantilla = {};
+
+    function intentarInyectarPlantillasDiagnostico() {
+        var campos = document.querySelectorAll('[id^="' + ID_BASE_ESTADO_EXTERNO + '"]');
+        campos.forEach(function(campoExterno) {
+            var sufijo = campoExterno.id.slice(ID_BASE_ESTADO_EXTERNO.length);
+            if (!sufijo || revisionesConSelectorPlantilla[sufijo]) return;
+
+            var barra = crearSelectorPlantillaDiagnostico(sufijo);
+            var contenedor = campoExterno.closest('.form-item') || campoExterno.parentElement;
+            if (!contenedor || !contenedor.parentNode) return;
+
+            contenedor.parentNode.insertBefore(barra, contenedor);
+            revisionesConSelectorPlantilla[sufijo] = true;
+        });
+    }
+
+    // Observer propio (nunca se desconecta): a diferencia de Mediciones/
+    // Soluciones, aquí pueden aparecer Revisiones nuevas en cualquier momento
+    // mientras el técnico trabaja en la página, así que hay que seguir
+    // vigilando todo el tiempo. Es una operación barata (un solo
+    // querySelectorAll por selector de atributo).
+    var observadorDiagnostico = new MutationObserver(function() { intentarInyectarPlantillasDiagnostico(); });
+    observadorDiagnostico.observe(document.body, { childList: true, subtree: true });
+    intentarInyectarPlantillasDiagnostico();
 
     // Aviso único en consola (5s tras cargar) para depurar campos que nunca aparecieron.
     setTimeout(function() {

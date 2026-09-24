@@ -159,6 +159,48 @@ Desde v15.1, apenas el campo **"Referencia del equipo"** de una fila de Medicion
 
 Al elegir una, se agrega al final de lo que ya estaba escrito en ese campo (ej. `7.0 pH <b><FONT COLOR="green">✔</FONT></b>`), que es como el sistema de la intranet pinta esos íconos de color en el informe. Si cambias de opinión y eliges otra opción, la marca anterior se reemplaza — nunca quedan dos marcas juntas. Si borras el campo, el botón desaparece solo.
 
+## Plantillas de "Diagnóstico Preliminar" por tipo de equipo (desde Google Drive)
+
+Desde v16.0, el bloque "Diagnóstico Preliminar" (Estado físico externo/interno, Descripción del procedimiento efectuado, Método de Verificación, Observaciones y recomendaciones) se puede llenar de una sola vez con un botón **"📋 Elegir plantilla de diagnóstico… → ➕ Cargar"**, según el tipo de equipo. A diferencia de Soluciones/Mediciones, aquí **se reemplaza** el contenido de los 5 campos (no se acumula) — es una plantilla completa, no puntos sueltos.
+
+### Cómo funciona por dentro
+
+- Cada tipo de equipo es un archivo `.txt` guardado en Google Drive (carpeta "Plantillas Hanna" del correo del equipo), con 5 secciones marcadas así:
+  ```
+  ###ESTADO_FISICO_EXTERNO###
+  ...texto...
+
+  ###ESTADO_FISICO_INTERNO###
+  ...texto...
+
+  ###DE ACUERDO CON LOS RESULTADOS OBTENIDOS ¿SE REQUIEREN ACCIONES CORRECTIVAS O PREVENTIVAS?###
+  ...texto... (esto cae en "Descripción del procedimiento efectuado")
+
+  ###MÉTODO_DE_VERIIFCACIÓN###
+  ...texto...
+
+  ###OBSERVACIONES###
+  ...texto...
+  ```
+- El script descarga el `.txt` directo desde Drive (link de descarga directa `drive.google.com/uc?export=download&id=...`) — **no requiere que nadie instale Google Drive de escritorio ni dé permisos de carpeta local**; funciona en cualquier navegador con solo tener internet.
+- Como una misma página puede tener hasta 5 "Revisión" (Revisión 1, 2, 3...) cada una con su propio Diagnóstico Preliminar, el botón se inyecta **una vez por cada Revisión que actives**, y cada una carga su propia plantilla de forma independiente — cargar una no toca las demás.
+- Si alguno de los 5 campos de esa Revisión ya tiene texto escrito, antes de reemplazarlo te pregunta si estás seguro.
+
+### Agregar un equipo nuevo
+
+1. Crea un `.txt` nuevo en esa misma carpeta de Drive, con las 5 secciones `###...###` de arriba (puedes duplicar uno existente y editarlo).
+2. En Drive, clic derecho sobre el archivo → **Compartir** → en "Acceso general" asegúrate de que diga **"Cualquier persona con el enlace"** con el rol **Lector** (si dice "Restringido", nadie más que tú podrá cargar esa plantilla). Puedes probarlo abriendo el link en una ventana de incógnito: si pide "Solicitar acceso", el permiso no quedó bien.
+3. Copia el ID del archivo del link (`drive.google.com/file/d/`**`ESTE_ID_AQUI`**`/view...`).
+4. En `panel-hanna.user.js`, en el arreglo `PLANTILLAS_DIAGNOSTICO`, agrega una línea nueva:
+   ```js
+   { clave: 'nombre_corto_del_equipo', etiqueta: '🧪 Nombre visible en el desplegable', url: 'https://drive.google.com/uc?export=download&id=EL_ID_QUE_COPIASTE' },
+   ```
+5. Sube el `@version`, commit y push.
+
+### Si el sitio cambia el "id" de algún campo
+
+Los 5 campos se ubican por el patrón de su `id` HTML (ej. `edit-diagnostico-preliminar-estado-fisico-externo-1`, donde `1` es el número de Revisión). Si la intranet cambia esos ids, hay que actualizar el arreglo `CAMPOS_DIAGNOSTICO` en el script — inspecciona el campo con clic derecho → Inspeccionar y avísale a Brayan el nuevo `id`.
+
 ## Cuando hagas un cambio
 
 1. Edita el archivo `.user.js` del script que quieras cambiar.
