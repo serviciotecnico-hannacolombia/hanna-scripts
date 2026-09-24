@@ -159,6 +159,10 @@ Desde v15.1, apenas el campo **"Referencia del equipo"** de una fila de Medicion
 
 Al elegir una, se agrega al final de lo que ya estaba escrito en ese campo (ej. `7.0 pH <b><FONT COLOR="green">✔</FONT></b>`), que es como el sistema de la intranet pinta esos íconos de color en el informe. Si cambias de opinión y eliges otra opción, la marca anterior se reemplaza — nunca quedan dos marcas juntas. Si borras el campo, el botón desaparece solo.
 
+### Soporte para varios "Informe de Revisión" (hasta 5 por página)
+
+Desde v16.3, Mediciones Iniciales/Finales y Soluciones Estándar funcionan igual de bien si activas un segundo, tercer... informe de Revisión en la misma página (antes solo funcionaba el primero). El sitio nombra los campos de cada Revisión como `mediciones_iniciales[N][fila][columna]` (y lo mismo para `mediciones_finales`/`soluciones_codigo`), así que el script detecta cuántas Revisiones hay activas ahora mismo y le pone su **propio** panel de checkboxes a cada una — eligen y cargan de forma totalmente independiente, sin mezclar datos entre Revisiones. Cuando hay más de una, el botón de cada panel se etiqueta "(Revisión 2)", "(Revisión 3)"... para que no haya confusión sobre cuál es cuál.
+
 ## Plantillas de "Diagnóstico Preliminar" por tipo de equipo (desde GitHub)
 
 Desde v16.0 (y usando GitHub en vez de Drive desde v16.1), el bloque "Diagnóstico Preliminar" (Estado físico externo/interno, Descripción del procedimiento efectuado, Método de Verificación, Observaciones y recomendaciones) se puede llenar de una sola vez con un botón **"📋 Elegir plantilla de diagnóstico… → ➕ Cargar"**, según el tipo de equipo. A diferencia de Soluciones/Mediciones, aquí **se reemplaza** el contenido de los 5 campos (no se acumula) — es una plantilla completa, no puntos sueltos.
@@ -189,14 +193,69 @@ Desde v16.0 (y usando GitHub en vez de Drive desde v16.1), el bloque "Diagnósti
 - Si alguno de los 5 campos de esa Revisión ya tiene texto escrito, antes de reemplazarlo te pregunta si estás seguro.
 - Nota: como este repo es **público**, estas plantillas quedan visibles para cualquiera (igual que los scripts). Son procedimientos técnicos genéricos, no datos de clientes — si en algún momento contienen algo sensible, avisa antes de subirlo así.
 
-### Agregar un equipo nuevo
+### Agregar un equipo nuevo (guía fácil, sin necesitar saber programar)
 
-1. Crea un `.txt` nuevo con las 5 secciones `###...###` de arriba (puedes duplicar uno existente y editarlo) y súbelo a la carpeta `plantillas-diagnostico/` de este repo (`git add`, `commit`, `push`, o directo desde la web de GitHub con "Add file").
-2. En `panel-hanna.user.js`, en el arreglo `PLANTILLAS_DIAGNOSTICO`, agrega una línea nueva:
-   ```js
-   { clave: 'nombre_corto_del_equipo', etiqueta: '🧪 Nombre visible en el desplegable', url: GITHUB_PLANTILLAS_BASE + 'nombre-del-archivo.txt' },
+No hace falta instalar nada ni usar la terminal — todo se hace desde la página de GitHub en el navegador. Son 3 partes.
+
+#### Parte 1: Prepara el archivo `.txt` de la plantilla
+
+1. Descarga (o abre) uno de los `.txt` que ya existen en `plantillas-diagnostico/` como punto de partida — es más fácil editar uno que empezar de cero.
+2. Debe tener EXACTAMENTE estas 5 líneas de marcador, cada una en su propia línea, seguidas del texto de esa sección:
    ```
-3. Sube el `@version`, commit y push.
+   ###ESTADO_FISICO_EXTERNO###
+   (aquí el texto para "Estado físico externo")
+
+   ###ESTADO_FISICO_INTERNO###
+   (aquí el texto para "Estado físico interno")
+
+   ###DE ACUERDO CON LOS RESULTADOS OBTENIDOS ¿SE REQUIEREN ACCIONES CORRECTIVAS O PREVENTIVAS?###
+   (aquí el texto para "Descripción del procedimiento efectuado")
+
+   ###MÉTODO_DE_VERIIFCACIÓN###
+   (aquí el texto para "Método de Verificación")
+
+   ###OBSERVACIONES###
+   (aquí el texto para "Observaciones y recomendaciones")
+   ```
+   ⚠️ Los marcadores `###...###` deben quedar escritos tal cual (mismas mayúsculas, mismos acentos) — si los cambias, esa sección no se va a reconocer.
+3. Guarda el archivo con un nombre corto, sin espacios ni tildes, terminado en `.txt` (ejemplo: `medidor-hi-9829.txt`).
+
+#### Parte 2: Sube el `.txt` a GitHub
+
+1. Entra a **github.com/serviciotecnico-hannacolombia/hanna-scripts** con la cuenta del equipo (`serviciotecnico.hannacolombia@gmail.com`).
+2. Entra a la carpeta **`plantillas-diagnostico`**.
+3. Clic en el botón verde **"Add file"** (arriba a la derecha de la lista de archivos) → **"Upload files"**.
+4. Arrastra tu `.txt` a la página (o clic en "choose your files" y búscalo).
+5. Abajo, en "Commit changes", escribe algo corto como *"Agregar plantilla medidor HI 9829"* y dale clic al botón verde **"Commit changes"**.
+
+#### Parte 3: Avísale al menú del script que existe esa plantilla nueva
+
+1. En el repo, abre el archivo **`panel-hanna.user.js`**.
+2. Clic en el ícono del lápiz ✏️ (arriba a la derecha del archivo) para editarlo ahí mismo, en el navegador.
+3. Con `Ctrl+F` (o `Cmd+F` en Mac) busca el texto `PLANTILLAS_DIAGNOSTICO` — te lleva directo al bloque que se ve así:
+   ```js
+   var PLANTILLAS_DIAGNOSTICO = [
+       { clave: 'tester_ph_orp_ce', etiqueta: '🧪 Tester pH/ORP/CE (HI 9XXXX)', url: GITHUB_PLANTILLAS_BASE + 'tester-ph-orp-ce.txt' },
+       ...
+       { clave: 'oximetro_portatil', etiqueta: '🧪 Oxímetro portátil', url: GITHUB_PLANTILLAS_BASE + 'oximetro-portatil.txt' }
+   ];
+   ```
+4. Justo después de la última línea de ese bloque (la que termina en `oximetro-portatil.txt' }`), agrega una línea nueva copiando el mismo formato:
+   ```js
+   { clave: 'medidor_hi_9829', etiqueta: '🧪 Medidor HI 9829', url: GITHUB_PLANTILLAS_BASE + 'medidor-hi-9829.txt' },
+   ```
+   - `clave`: un nombre corto interno, sin espacios (no lo ve el técnico).
+   - `etiqueta`: el texto que SÍ va a ver el técnico en el desplegable.
+   - el nombre del `.txt` después de `GITHUB_PLANTILLAS_BASE +` debe coincidir exactamente con el archivo que subiste en la Parte 2 (mayúsculas, guiones, todo igual).
+   - ⚠️ No olvides la coma `,` al final de la línea, ni las comillas `'...'`.
+5. Ahora sube la versión, para que a todos les llegue la actualización: con `Ctrl+F` busca `@version` (aparece cerca del inicio del archivo) y súbele 0.1 (ej. `16.4` → `16.5`). Un poco más abajo busca `APP_VERSION = ` y ponle el MISMO número ahí también (tienen que quedar iguales los dos).
+6. Baja hasta el final de la página, escribe un mensaje corto en "Commit changes" (ej. *"Agregar plantilla medidor HI 9829 al menú"*) y dale clic al botón verde **"Commit changes"**.
+
+#### Para probarlo
+
+Espera unos minutos (o en Tampermonkey, ícono de la extensión → **Dashboard** → menú **☰ → Utilities → Check for userscript updates**) y recarga la página de la intranet. Abre un informe, en "Diagnóstico Preliminar" debería aparecer tu plantilla nueva en el desplegable — selecciónala, dale "➕ Cargar" y revisa que los 5 campos se llenen bien.
+
+Si algo no te queda claro o prefieres no tocar el código, mándame el `.txt` con las 5 secciones y el nombre que quieres que aparezca en el desplegable, y yo dejo listo el paso 3.
 
 ### Si el sitio cambia el "id" de algún campo
 
