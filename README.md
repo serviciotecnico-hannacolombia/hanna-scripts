@@ -13,6 +13,7 @@ Instala solo los que uses — cada uno vive en su propia página de la intranet 
 | **QR Órdenes de Trabajo** | `.../stecnico/item/*` | Genera un QR con el ID de la OT, fecha, NIT/cliente y correo de contacto; incluye versión lista para imprimir. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/qr-ordenes-trabajo.user.js) |
 | **WhatsApp Pre-Ingreso** | `.../stecnico/pre_ingreso/item/*` | Detecta el/los celular(es) del contacto y muestra botones de WhatsApp con un mensaje predeterminado. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/whatsapp-preingreso.user.js) |
 | **WhatsApp OT** | `.../stecnico/item/*` | Igual que el anterior pero para la página de la OT. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/whatsapp-ot.user.js) |
+| **Lineamientos del Cliente** | `.../stecnico/item/N` (solo "Ver Detalle") | Detecta el NIT del cliente y muestra sus lineamientos especiales (por categoría) debajo de la tarjeta de Estado, leídos desde Google Sheets. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/lineamientos-cliente.user.js) |
 
 ## Instalación (una sola vez, por persona, por cada script)
 
@@ -264,6 +265,42 @@ Si algo no te queda claro o prefieres no tocar el código, mándame el `.txt` co
 ### Si el sitio cambia el "id" de algún campo
 
 Los 5 campos se ubican por el patrón de su `id` HTML (ej. `edit-diagnostico-preliminar-estado-fisico-externo-1`, donde `1` es el número de Revisión). Si la intranet cambia esos ids, hay que actualizar el arreglo `CAMPOS_DIAGNOSTICO` en el script — inspecciona el campo con clic derecho → Inspeccionar y avísale a Brayan el nuevo `id`.
+
+## Lineamientos del Cliente: aviso por NIT desde Google Sheets
+
+En la página **"Ver Detalle"** de una OT (`.../stecnico/item/12345`, sin ningún sufijo — no aparece en la pestaña "Diagnóstico" ni en las demás pestañas), el script busca el NIT del cliente en la página y, si tiene lineamientos especiales registrados, muestra una tarjeta amarilla justo debajo de la tarjeta de "Estado" con el resumen, agrupado por categoría. Si el cliente no tiene nada registrado, no aparece ninguna tarjeta — no estorba en el resto de las OT.
+
+### El Sheet: pestaña "lineamientos"
+
+Es una pestaña nueva en el mismo Google Sheet que ya usan Soluciones/Mediciones ("Patrones de ST"), publicada igual que las otras (Archivo → Compartir → Publicar en la Web). Columnas:
+
+| NIT | Razon Social | Categoria | Lineamiento |
+|---|---|---|---|
+| 901107537 | CONSTRUCCIONES & SERVICIOS INTEGRALES | Ingreso en Intranet | No cotizar despacho tras el diagnóstico |
+| *(vacío)* | *(vacío)* | Facturación y Despacho | Facturar solo a nombre de la razón social principal |
+| *(vacío)* | *(vacío)* | Facturación y Despacho | Avisar un día antes del despacho |
+| 900999999 | OTRO CLIENTE SAS | Comunicación con el Cliente | Todo por correo, nunca llamar |
+
+**Una fila por lineamiento.** El NIT y la Razón Social solo se escriben en la **primera fila** de cada cliente — en las filas siguientes de ese mismo cliente se dejan en blanco (el script entiende "en blanco" como "mismo cliente que la fila de arriba"). En cuanto aparece un NIT nuevo en la columna, se asume que empieza otro cliente.
+
+Las categorías que el script conoce y en qué orden las muestra (sin importar el orden de las filas en el Sheet):
+
+1. Ingreso en Intranet
+2. Diagnóstico
+3. Equipos Operativos
+4. Equipos No Operativos
+5. Facturación y Despacho
+6. Comunicación con el Cliente
+
+Si escribes una categoría que no es exactamente una de esas 6 (por un typo, o porque agregaste una nueva), el lineamiento **no se pierde** — igual se muestra, solo que al final de la tarjeta, después de las 6 conocidas.
+
+### Agregar/quitar un lineamiento
+
+Solo edita la pestaña "lineamientos" del Sheet — agrega o borra filas ahí. No hay que tocar el script para esto; el cambio se ve reflejado la próxima vez que alguien abra esa OT (el script no cachea entre visitas, siempre pide el dato más reciente al Sheet, y solo usa la copia guardada en el navegador si el Sheet no responde).
+
+### Cómo encuentra el NIT en la página
+
+Usa el mismo método que ya prueba **QR Órdenes de Trabajo**: busca un elemento chico de la página que contenga la palabra "NIT" seguida de números, en vez de depender de un `id` fijo (la intranet no le pone uno a ese bloque). Si el sitio cambia por completo cómo muestra el NIT del cliente y el script deja de encontrarlo, avísale a Brayan con una captura de esa sección de "Ver Detalle".
 
 ## Cuando hagas un cambio
 
