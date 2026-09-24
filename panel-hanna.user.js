@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.6
+// @version      16.12
 // @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.6';
+    var APP_VERSION = '16.12';
 
     var columnasPorFilaLecturas = 3;
 
@@ -410,6 +410,14 @@
             if (!inputValor || inputValor.dataset.hannaBotonEstado) continue; // ya tiene botón
             inputValor.dataset.hannaBotonEstado = '1';
 
+            // El marcador de resultado (✔/✘/Inestable) que agrega
+            // aplicarMarcadorEstado() es HTML (<b><FONT COLOR="...">...</FONT></b>),
+            // así que estos 3 campos de la fila también reciben el resaltado
+            // en vivo para detectar una etiqueta mal escrita.
+            for (var colResaltado = 0; colResaltado < COLUMNAS_POR_LECTURA; colResaltado++) {
+                envolverConResaltadoHTML(inputs[base + colResaltado]);
+            }
+
             (function(inputValor) {
                 var envoltorio = document.createElement('span');
                 envoltorio.style.position = 'relative';
@@ -575,6 +583,11 @@
             var ultimoInput = inputsFila[COLUMNAS_POR_SOLUCION - 1];
             if (!ultimoInput || ultimoInput.dataset.hannaBotonFila) continue; // ya tiene botón
             ultimoInput.dataset.hannaBotonFila = '1';
+
+            // Los 4 campos de Soluciones también pueden llevar HTML escrito
+            // a mano (igual que en Diagnóstico Preliminar), así que reciben
+            // el mismo resaltado en vivo.
+            inputsFila.forEach(function(inp) { envolverConResaltadoHTML(inp); });
 
             (function(baseFila, inputsFila) {
                 var boton = document.createElement('button');
@@ -1017,6 +1030,350 @@
         { clave: 'oximetro_portatil', etiqueta: '🧪 Oxímetro portátil', url: GITHUB_PLANTILLAS_BASE + 'oximetro-portatil.txt' }
     ];
 
+    // ─────────────────────────────────────────────
+    // Resaltado en vivo de HTML dentro de los campos de Diagnóstico
+    // Preliminar. Las plantillas (y lo que se escriba a mano) usan etiquetas
+    // como <b> y <mark style="..."> que el sistema interpreta al generar el
+    // informe — pero mientras se escribe, el campo solo muestra texto plano,
+    // así que si falta un ">" o una etiqueta queda sin cerrar, no se nota
+    // hasta que el informe ya salió mal. Esto pinta las etiquetas de un
+    // color y resalta en rojo cualquier etiqueta rota, directamente encima
+    // del campo real (una capa visual: lo que se guarda en el campo no
+    // cambia en nada).
+    // ─────────────────────────────────────────────
+    var VOID_ELEMENTS_HTML = { br: true, hr: true, img: true };
+
+    function tokenizarHTML(texto) {
+        var tokens = [];
+        var i = 0;
+        while (i < texto.length) {
+            if (texto.charAt(i) === '<') {
+                var cierre = texto.indexOf('>', i);
+                var siguienteApertura = texto.indexOf('<', i + 1);
+                if (cierre === -1 || (siguienteApertura !== -1 && siguienteApertura < cierre)) {
+                    var fin = siguienteApertura !== -1 ? siguienteApertura : texto.length;
+                    tokens.push({ tipo: 'error', texto: texto.slice(i, fin), inicio: i, fin: fin });
+                    i = fin;
+                } else {
+                    tokens.push({ tipo: 'tag', texto: texto.slice(i, cierre + 1), inicio: i, fin: cierre + 1 });
+                    i = cierre + 1;
+                }
+            } else {
+                var next = texto.indexOf('<', i);
+                var end = next === -1 ? texto.length : next;
+                tokens.push({ tipo: 'text', texto: texto.slice(i, end), inicio: i, fin: end });
+                i = end;
+            }
+        }
+        return tokens;
+    }
+
+    function numeroDeLineaHTML(texto, pos) {
+        return texto.slice(0, pos).split('\n').length;
+    }
+
+    function validarBalanceHTML(tagTokens, texto) {
+        var pila = [];
+        var problemas = [];
+        tagTokens.forEach(function(t) {
+            var m = t.texto.match(/^<(\/?)([a-zA-Z][a-zA-Z0-9]*)/);
+            if (!m) return;
+            var esCierre = m[1] === '/';
+            var nombre = m[2].toLowerCase();
+            var autoCerrada = /\/>\s*$/.test(t.texto) || VOID_ELEMENTS_HTML[nombre];
+            if (esCierre) {
+                var idx = -1;
+                for (var k = pila.length - 1; k >= 0; k--) {
+                    if (pila[k].nombre === nombre) { idx = k; break; }
+                }
+                if (idx === pila.length - 1) {
+                    pila.pop();
+                } else if (idx > -1) {
+                    for (var r = pila.length - 1; r > idx; r--) {
+                        problemas.push('Falta cerrar <' + pila[r].nombre + '> (línea ' + numeroDeLineaHTML(texto, pila[r].pos) + ')');
+                    }
+                    pila.length = idx;
+                } else {
+                    problemas.push('</' + nombre + '> sin apertura (línea ' + numeroDeLineaHTML(texto, t.inicio) + ')');
+                }
+            } else if (!autoCerrada) {
+                pila.push({ nombre: nombre, pos: t.inicio });
+            }
+        });
+        pila.forEach(function(s) {
+            problemas.push('<' + s.nombre + '> nunca se cierra (línea ' + numeroDeLineaHTML(texto, s.pos) + ')');
+        });
+        return problemas;
+    }
+
+    function calcularProblemasHTML(texto) {
+        var tokens = tokenizarHTML(texto);
+        var tagTokens = tokens.filter(function(t) { return t.tipo === 'tag'; });
+        var problemas = validarBalanceHTML(tagTokens, texto);
+        tokens.forEach(function(t) {
+            if (t.tipo === 'error') {
+                problemas.push('Falta el ">" que cierra una etiqueta (línea ' + numeroDeLineaHTML(texto, t.inicio) + ')');
+            }
+        });
+        return problemas;
+    }
+
+    function escaparHTML(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function resaltarTagHTML(tagTexto) {
+        var m = tagTexto.match(/^(<\/?)([a-zA-Z][a-zA-Z0-9]*)([\s\S]*?)(\/?>)$/);
+        if (!m) return escaparHTML(tagTexto);
+        var apertura = escaparHTML(m[1]);
+        var nombre = '<span style="color:#0e7c86;font-weight:600;">' + escaparHTML(m[2]) + '</span>';
+        var resto = escaparHTML(m[3]).replace(/([a-zA-Z-]+)(=)(&quot;[^&]*?&quot;|&#39;[^&]*?&#39;)/g, function(full, an, eq, av) {
+            return '<span style="color:#9a6b00;">' + an + '</span>' + eq + '<span style="color:#2f7d4f;">' + av + '</span>';
+        });
+        var cierre = escaparHTML(m[4]);
+        return apertura + nombre + resto + cierre;
+    }
+
+    // "agregarSaltoFinal" evita que un <textarea> colapse visualmente el
+    // último salto de línea; en un <input> (una sola línea) no aplica.
+    function generarHTMLResaltado(texto, agregarSaltoFinal) {
+        var tokens = tokenizarHTML(texto);
+        var html = '';
+        tokens.forEach(function(t) {
+            if (t.tipo === 'tag') {
+                html += '<span style="background:rgba(14,124,134,0.10);border-radius:2px;">' + resaltarTagHTML(t.texto) + '</span>';
+            } else if (t.tipo === 'error') {
+                html += '<span style="background:#fbe4e2;color:#b3261e;text-decoration:underline wavy #b3261e;border-radius:2px;">' + escaparHTML(t.texto) + '</span>';
+            } else {
+                html += escaparHTML(t.texto);
+            }
+        });
+        return agregarSaltoFinal ? html + '\n' : html;
+    }
+
+    // Propiedades que afectan cómo se ve/envuelve el texto: se copian del
+    // campo real a la capa de resaltado para que ambas capas queden
+    // exactamente encimadas (mismo tamaño de letra, mismo relleno, etc.),
+    // sin importar el CSS propio de la intranet.
+    var PROPIEDADES_A_COPIAR_RESALTADO = [
+        'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight',
+        'letterSpacing', 'wordSpacing', 'textIndent', 'textAlign', 'direction',
+        'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+        'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+        'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
+        'boxSizing', 'tabSize'
+    ];
+
+    // Oculta la barra de scroll propia de la capa de resaltado (el scroll
+    // real que usa el técnico es el del campo real, que queda encima; el de
+    // la capa solo se sincroniza por código para que el texto no se desfase
+    // al hacer scroll). Se agrega una sola vez para toda la página.
+    function asegurarEstiloOcultarScrollCapa() {
+        if (document.getElementById('hanna-resaltado-estilos')) return;
+        var tag = document.createElement('style');
+        tag.id = 'hanna-resaltado-estilos';
+        tag.textContent = '.hanna-resaltado-capa{scrollbar-width:none;-ms-overflow-style:none;}' +
+            '.hanna-resaltado-capa::-webkit-scrollbar{display:none;width:0;height:0;}';
+        document.head.appendChild(tag);
+    }
+
+    // OJO: la envoltura NO fija un ancho/alto en píxeles a mano (una versión
+    // anterior lo hizo copiando offsetWidth/offsetHeight, y en producción
+    // eso generó una barra de scroll horizontal larguísima porque ese
+    // cálculo no coincidía con el tamaño real del campo en el layout de la
+    // intranet). En vez de eso, el campo real se queda en flujo normal
+    // (position: relative, no absolute) con su tamaño de siempre, y la
+    // envoltura — que solo lo contiene a él — se ajusta sola a ese mismo
+    // tamaño porque no tiene ancho/alto propio. La capa de resaltado, con
+    // position: absolute + inset 0 dentro de esa envoltura, queda calzada
+    // automáticamente sin necesitar copiar ningún número.
+    // El aviso de error se pone DENTRO de la envoltura, como un globito
+    // flotante (position: absolute) en vez de un elemento normal del flujo.
+    // Así nunca empuja ni desalinea nada a su alrededor — algo que importa
+    // sobre todo en Mediciones/Soluciones, donde varios campos van pegados
+    // uno junto al otro en la misma fila.
+    function crearAvisoFlotante() {
+        var aviso = document.createElement('div');
+        aviso.className = 'hanna-resaltado-aviso';
+        aviso.style.position = 'absolute';
+        aviso.style.zIndex = '5';
+        aviso.style.fontSize = '11px';
+        aviso.style.lineHeight = '1.4';
+        aviso.style.maxWidth = '320px';
+        aviso.style.padding = '3px 7px';
+        aviso.style.borderRadius = '4px';
+        aviso.style.fontFamily = 'Arial, Helvetica, sans-serif';
+        aviso.style.color = '#b3261e';
+        aviso.style.background = '#fbe4e2';
+        aviso.style.border = '1px solid #f0b7b2';
+        aviso.style.boxShadow = '0 2px 6px rgba(0,0,0,0.12)';
+        aviso.style.display = 'none';
+        return aviso;
+    }
+
+    // OJO: a diferencia de las versiones anteriores (v16.7-16.11), el campo
+    // real NUNCA se mueve a un nuevo <div> envoltorio — eso fue lo que rompió
+    // el ancho en Mediciones/Soluciones (production: v16.11 dejó los campos
+    // "muy pequeños"). Cualquier envoltorio nuevo pierde la relación de CSS
+    // que el sitio usa para darle su ancho al campo (flex, %, celda de
+    // tabla...), y no hay forma de adivinar cuál es sin ver el CSS real.
+    //
+    // En vez de envolver, el campo se queda exactamente donde estaba, con su
+    // padre de siempre — solo se asegura que ese padre tenga
+    // "position: relative" (si ya no tenía una posición propia), lo cual NO
+    // cambia en nada su tamaño ni el de sus hermanos. La capa de color y el
+    // aviso son hermanos del campo, dibujados como position:absolute y
+    // alineados por MEDICIÓN (offsetLeft/offsetTop/offsetWidth/offsetHeight)
+    // en vez de por estructura. Si algo sale mal aquí, en el peor caso el
+    // dibujo queda mal alineado — pero el campo real jamás cambia de tamaño.
+    function asegurarContenedorPosicionado(campo) {
+        var padre = campo.parentNode;
+        if (!padre) return null;
+        var estiloPadre = window.getComputedStyle(padre);
+        if (estiloPadre.position === 'static') {
+            padre.style.position = 'relative';
+        }
+        return padre;
+    }
+
+    function sincronizarCapaConCampo(campo, capa) {
+        capa.style.left = campo.offsetLeft + 'px';
+        capa.style.top = campo.offsetTop + 'px';
+        capa.style.width = campo.offsetWidth + 'px';
+        capa.style.height = campo.offsetHeight + 'px';
+    }
+
+    function sincronizarAvisoConCampo(campo, aviso) {
+        aviso.style.left = campo.offsetLeft + 'px';
+        aviso.style.top = (campo.offsetTop + campo.offsetHeight + 3) + 'px';
+    }
+
+    // Mantiene la capa/el aviso pegados al campo si su tamaño o posición
+    // cambian (ventana redimensionada, el técnico agranda un <textarea>
+    // arrastrando la esquina, etc.).
+    function observarGeometria(campo, sincronizar) {
+        sincronizar();
+        if (window.ResizeObserver) new ResizeObserver(sincronizar).observe(campo);
+        window.addEventListener('resize', sincronizar);
+    }
+
+    // Modo completo (para los 5 campos grandes de Diagnóstico Preliminar,
+    // que son <textarea>): pinta las etiquetas de color directamente encima
+    // del texto, con una capa transparente superpuesta al campo real.
+    function activarResaltadoCompleto(campo) {
+        asegurarEstiloOcultarScrollCapa();
+        var padre = asegurarContenedorPosicionado(campo);
+        if (!padre) return;
+
+        var estilo = window.getComputedStyle(campo);
+        // OJO: getComputedStyle() devuelve un objeto "vivo" — si se lee
+        // estilo.color DESPUÉS de poner campo.style.color en transparente,
+        // ya devuelve ese transparente (como "rgba(0, 0, 0, 0)", que no es
+        // igual al string "transparent", así que el chequeo de más abajo no
+        // lo detectaba) y el cursor de escritura terminaba siendo invisible.
+        // Por eso el color y el fondo originales se copian a variables ANTES
+        // de tocar el estilo del campo.
+        var colorOriginalTexto = estilo.color;
+        var fondoOriginal = estilo.backgroundColor;
+
+        var capa = document.createElement('div');
+        capa.className = 'hanna-resaltado-capa';
+        capa.setAttribute('aria-hidden', 'true');
+        capa.style.position = 'absolute';
+        capa.style.zIndex = '0';
+        capa.style.margin = '0';
+        capa.style.overflow = 'auto';
+        capa.style.whiteSpace = 'pre-wrap';
+        capa.style.wordWrap = 'break-word';
+        capa.style.pointerEvents = 'none';
+        capa.style.background = fondoOriginal;
+        capa.style.color = colorOriginalTexto;
+        PROPIEDADES_A_COPIAR_RESALTADO.forEach(function(prop) { capa.style[prop] = estilo[prop]; });
+        capa.style.borderColor = 'transparent';
+        padre.insertBefore(capa, campo);
+
+        // El campo se queda en su mismo padre y su mismo lugar del flujo
+        // normal — "position: relative" sin mover nada (sin top/left) no le
+        // cambia el tamaño en nada, solo permite que pinte encima de la capa.
+        campo.style.position = 'relative';
+        campo.style.zIndex = '1';
+        campo.style.background = 'transparent';
+        campo.style.color = 'transparent';
+        campo.style.webkitTextFillColor = 'transparent';
+        campo.style.caretColor = (colorOriginalTexto && colorOriginalTexto.indexOf('rgba(0, 0, 0, 0)') === -1 && colorOriginalTexto !== 'transparent') ? colorOriginalTexto : '#000';
+
+        var aviso = crearAvisoFlotante();
+        padre.appendChild(aviso);
+
+        function sincronizarGeometria() {
+            sincronizarCapaConCampo(campo, capa);
+            sincronizarAvisoConCampo(campo, aviso);
+        }
+
+        function actualizar() {
+            capa.innerHTML = generarHTMLResaltado(campo.value, true);
+            sincronizarGeometria();
+            var problemas = calcularProblemasHTML(campo.value);
+            if (problemas.length === 0) {
+                aviso.style.display = 'none';
+            } else {
+                aviso.style.display = 'block';
+                aviso.innerText = '⚠️ ' + problemas.join(' · ');
+            }
+        }
+
+        campo.addEventListener('input', actualizar);
+        campo.addEventListener('scroll', function() {
+            capa.scrollTop = campo.scrollTop;
+            capa.scrollLeft = campo.scrollLeft;
+        });
+
+        observarGeometria(campo, sincronizarGeometria);
+        actualizar();
+    }
+
+    // Modo simple (para los <input> de Mediciones/Soluciones): estos campos
+    // son angostos, así que mostrar el HTML coloreado carácter por carácter
+    // termina recortado feo contra el borde — es un problema de espacio, no
+    // de resaltado. Acá el campo real no se toca EN NADA (ni color, ni
+    // fondo, ni posición): solo se le pone un contorno rojo cuando algo está
+    // roto, con el mismo aviso flotante explicando qué.
+    function activarValidacionSimple(campo) {
+        var padre = asegurarContenedorPosicionado(campo);
+        if (!padre) return;
+
+        var aviso = crearAvisoFlotante();
+        padre.appendChild(aviso);
+
+        function actualizar() {
+            sincronizarAvisoConCampo(campo, aviso);
+            var problemas = calcularProblemasHTML(campo.value);
+            if (problemas.length === 0) {
+                aviso.style.display = 'none';
+                campo.style.outline = '';
+            } else {
+                aviso.style.display = 'block';
+                aviso.innerText = '⚠️ ' + problemas.join(' · ');
+                campo.style.outline = '2px solid #b3261e';
+            }
+        }
+
+        campo.addEventListener('input', actualizar);
+        observarGeometria(campo, function() { sincronizarAvisoConCampo(campo, aviso); });
+        actualizar();
+    }
+
+    function envolverConResaltadoHTML(campo) {
+        if (!campo || campo.dataset.hannaResaltado === '1') return;
+        campo.dataset.hannaResaltado = '1';
+
+        if (campo.tagName === 'INPUT') {
+            activarValidacionSimple(campo);
+        } else {
+            activarResaltadoCompleto(campo);
+        }
+    }
+
     // idBase + sufijo ("1", "2"...) = id real del campo en esa Revisión.
     var CAMPOS_DIAGNOSTICO = [
         { clave: 'ESTADO_FISICO_EXTERNO', idBase: 'edit-diagnostico-preliminar-estado-fisico-externo-' },
@@ -1223,6 +1580,14 @@
             // por cada Revisión real. Una Revisión válida siempre es un
             // número puro.
             if (!sufijo || !/^\d+$/.test(sufijo)) return;
+
+            // Resaltado de HTML: se intenta en cada pasada del observer.
+            // envolverConResaltadoHTML no hace nada si el campo ya está
+            // envuelto (o si todavía no es medible), así que repetir esto
+            // no tiene costo y cubre campos que aparezcan más tarde.
+            CAMPOS_DIAGNOSTICO.forEach(function(campoDef) {
+                envolverConResaltadoHTML(document.getElementById(campoDef.idBase + sufijo));
+            });
 
             var yaExiste = document.querySelector('[data-hanna-plantilla-barra-sufijo="' + sufijo + '"]');
             if (yaExiste) return;
