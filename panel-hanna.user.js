@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.0
-// @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde Google Drive
+// @version      16.1
+// @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
 // @grant        none
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.0';
+    var APP_VERSION = '16.1';
 
     var columnasPorFilaLecturas = 3;
 
@@ -948,12 +948,19 @@
     // termina en "-1", "-2", etc. Por eso los campos se ubican por PATRÓN de
     // id (prefijo + número de revisión), nunca por un id fijo.
 
+    // Nota: NO se usa Google Drive aquí — los links de descarga directa de
+    // Drive no permiten fetch() desde otro sitio (bloqueo de CORS), así que
+    // los .txt viven en el mismo repo de GitHub que ya sirve los scripts
+    // (raw.githubusercontent.com sí permite esto, es justo lo que usa
+    // Tampermonkey para @updateURL/@downloadURL).
+    var GITHUB_PLANTILLAS_BASE = 'https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/plantillas-diagnostico/';
+
     var PLANTILLAS_DIAGNOSTICO = [
-        { clave: 'tester_ph_orp_ce', etiqueta: '🧪 Tester pH/ORP/CE (HI 9XXXX)', url: 'https://drive.google.com/uc?export=download&id=1p2oBusPVja3tGjeW0Tw37p_5Iur-LGy1' },
-        { clave: 'multiparametro_sobremesa', etiqueta: '🧪 Multiparámetro de sobremesa', url: 'https://drive.google.com/uc?export=download&id=1ImM7UVKMoINJRFGtw6_2ZvqfN06N35Wn' },
-        { clave: 'multiparametro_portatil', etiqueta: '🧪 Multiparámetro portátil (HI 98XXX)', url: 'https://drive.google.com/uc?export=download&id=1tG12mRViY1J2qsfaVlaXY4IqFSc1QDsO' },
-        { clave: 'ph_ise_orp_ce_portatil', etiqueta: '🧪 pH/ISE/ORP/CE portátil', url: 'https://drive.google.com/uc?export=download&id=1llggro6EadrBRW_LtlT3RYN1kWdF470Y' },
-        { clave: 'oximetro_portatil', etiqueta: '🧪 Oxímetro portátil', url: 'https://drive.google.com/uc?export=download&id=1pDjmn_KBdzv1gut6HMJTBqK-lwgb-jaj' }
+        { clave: 'tester_ph_orp_ce', etiqueta: '🧪 Tester pH/ORP/CE (HI 9XXXX)', url: GITHUB_PLANTILLAS_BASE + 'tester-ph-orp-ce.txt' },
+        { clave: 'multiparametro_sobremesa', etiqueta: '🧪 Multiparámetro de sobremesa', url: GITHUB_PLANTILLAS_BASE + 'multiparametro-sobremesa.txt' },
+        { clave: 'multiparametro_portatil', etiqueta: '🧪 Multiparámetro portátil (HI 98XXX)', url: GITHUB_PLANTILLAS_BASE + 'multiparametro-portatil.txt' },
+        { clave: 'ph_ise_orp_ce_portatil', etiqueta: '🧪 pH/ISE/ORP/CE portátil', url: GITHUB_PLANTILLAS_BASE + 'ph-ise-orp-ce-portatil.txt' },
+        { clave: 'oximetro_portatil', etiqueta: '🧪 Oxímetro portátil', url: GITHUB_PLANTILLAS_BASE + 'oximetro-portatil.txt' }
     ];
 
     // idBase + sufijo ("1", "2"...) = id real del campo en esa Revisión.
@@ -968,7 +975,10 @@
     var ID_BASE_ESTADO_EXTERNO = CAMPOS_DIAGNOSTICO[0].idBase; // sirve para detectar cuántas Revisiones hay
 
     // Descarga el .txt de la plantilla (sin caché de navegador) y, si falla,
-    // usa la última copia guardada en localStorage.
+    // usa la última copia guardada en localStorage. Llama a "callback" con el
+    // texto si lo consigue (por descarga o por caché), o con null si no hay
+    // forma de conseguirlo — SIEMPRE llama a "callback" una vez, para que
+    // quien lo use pueda restaurar su botón aunque falle.
     function obtenerTextoPlantilla(plantilla, callback) {
         var cacheKey = 'hanna_plantilla_cache_' + plantilla.clave;
         fetch(plantilla.url, { cache: 'no-store' })
@@ -985,6 +995,7 @@
                     callback(cache);
                 } else {
                     alert('No se pudo descargar la plantilla "' + plantilla.etiqueta + '" y no hay una copia guardada localmente. Revisa tu conexión e intenta de nuevo.');
+                    callback(null);
                 }
             });
     }
@@ -1082,10 +1093,12 @@
             botonCargar.innerText = 'Cargando…';
 
             obtenerTextoPlantilla(plantilla, function(texto) {
-                cargarPlantillaDiagnostico(sufijo, parsearPlantilla(texto));
+                if (texto) {
+                    cargarPlantillaDiagnostico(sufijo, parsearPlantilla(texto));
+                    select.value = '';
+                }
                 botonCargar.disabled = false;
                 botonCargar.innerText = textoOriginalBoton;
-                select.value = '';
             });
         };
 
@@ -1097,18 +1110,25 @@
     // Busca todos los bloques de "Diagnóstico Preliminar" presentes AHORA
     // MISMO en la página (uno por cada Revisión activada) y le agrega su
     // propio selector de plantilla al que todavía no lo tenga.
+    //
+    // La marca "hannaPlantillaInyectada" queda escrita en el propio elemento
+    // del DOM (no solo en una variable de memoria): así, si Tampermonkey
+    // llegara a ejecutar el script dos veces sobre la misma página (por
+    // ejemplo, tras una actualización sin recargar del todo), la segunda
+    // ejecución ve la marca ya puesta y no vuelve a insertar la barra.
     var revisionesConSelectorPlantilla = {};
 
     function intentarInyectarPlantillasDiagnostico() {
         var campos = document.querySelectorAll('[id^="' + ID_BASE_ESTADO_EXTERNO + '"]');
         campos.forEach(function(campoExterno) {
             var sufijo = campoExterno.id.slice(ID_BASE_ESTADO_EXTERNO.length);
-            if (!sufijo || revisionesConSelectorPlantilla[sufijo]) return;
+            if (!sufijo || revisionesConSelectorPlantilla[sufijo] || campoExterno.dataset.hannaPlantillaInyectada) return;
 
             var barra = crearSelectorPlantillaDiagnostico(sufijo);
             var contenedor = campoExterno.closest('.form-item') || campoExterno.parentElement;
             if (!contenedor || !contenedor.parentNode) return;
 
+            campoExterno.dataset.hannaPlantillaInyectada = '1';
             contenedor.parentNode.insertBefore(barra, contenedor);
             revisionesConSelectorPlantilla[sufijo] = true;
         });
