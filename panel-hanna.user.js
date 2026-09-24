@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.3
+// @version      16.4
 // @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.3';
+    var APP_VERSION = '16.4';
 
     var columnasPorFilaLecturas = 3;
 
@@ -1178,7 +1178,15 @@
         var campos = document.querySelectorAll('[id^="' + ID_BASE_ESTADO_EXTERNO + '"]');
         campos.forEach(function(campoExterno) {
             var sufijo = campoExterno.id.slice(ID_BASE_ESTADO_EXTERNO.length);
-            if (!sufijo) return;
+            // Cada campo real tiene, además, un contenedor "hermano" cuyo id
+            // es el mismo + "-wrapper" (ej. "...-estado-fisico-externo-1-wrapper"),
+            // que TAMBIÉN empieza con el mismo prefijo y por lo tanto cae en
+            // este querySelectorAll. Si no se filtra, ese wrapper se cuenta
+            // como si fuera una Revisión aparte (sufijo "1-wrapper" en vez de
+            // "1") y se le inserta su propia barra — de ahí salían 2 barras
+            // por cada Revisión real. Una Revisión válida siempre es un
+            // número puro.
+            if (!sufijo || !/^\d+$/.test(sufijo)) return;
 
             var yaExiste = document.querySelector('[data-hanna-plantilla-barra-sufijo="' + sufijo + '"]');
             if (yaExiste) return;
