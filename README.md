@@ -302,6 +302,15 @@ Solo edita la pestaña "lineamientos" del Sheet — agrega o borra filas ahí. N
 
 Usa el mismo método que ya prueba **QR Órdenes de Trabajo**: busca un elemento chico de la página que contenga la palabra "NIT" seguida de números, en vez de depender de un `id` fijo (la intranet no le pone uno a ese bloque). Si el sitio cambia por completo cómo muestra el NIT del cliente y el script deja de encontrarlo, avísale a Brayan con una captura de esa sección de "Ver Detalle".
 
+### Renombrar etiquetas de la tabla de "Ver Detalle"
+
+Desde v1.1.0, el mismo script también cambia el texto de un par de etiquetas de la tabla (columna izquierda) en TODAS las OTST, sin tocar nada del lado del servidor:
+
+- "E-mails del cliente para copia de notificaciones" → **"E-mails de Copia"**
+- "Última Atención Aplicaciones Cliente" → **"Ultima visita IA"**
+
+Esto es puramente visual (solo cambia lo que se ve en el navegador de quien tenga el script instalado; no renombra nada en la base de datos ni en reportes). Para agregar o cambiar un renombre, edita el objeto `RENOMBRES_ETIQUETAS` en `lineamientos-cliente.user.js` (clave = texto exacto actual de la etiqueta, valor = texto nuevo) y sube el `@version`.
+
 ## Cuando hagas un cambio
 
 1. Edita el archivo `.user.js` del script que quieras cambiar.

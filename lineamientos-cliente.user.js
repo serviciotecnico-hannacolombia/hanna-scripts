@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lineamientos del Cliente - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.0.0
-// @description  Muestra los lineamientos especiales del cliente (por NIT), leídos de Google Sheets, debajo de la tarjeta de Estado en "Ver Detalle" de la OT.
+// @version      1.1.0
+// @description  Muestra los lineamientos especiales del cliente (por NIT), leídos de Google Sheets, debajo de la tarjeta de Estado; y renombra un par de etiquetas de la tabla de detalle. Todo en "Ver Detalle" de la OT.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
 // @grant        none
@@ -15,7 +15,7 @@
   'use strict';
 
   // Debe coincidir siempre con @version del header de arriba.
-  const APP_VERSION = '1.0.0';
+  const APP_VERSION = '1.1.0';
 
   // ─────────────────────────────────────────────
   // CONFIGURACIÓN
@@ -49,6 +49,25 @@
 
   function normalizarNit(texto) {
     return (texto || '').replace(/[^\d]/g, '');
+  }
+
+  // ─────────────────────────────────────────────
+  // Renombra etiquetas de la tabla "Ver Detalle" (las celdas <td class="key">
+  // con el nombre del campo, ej. "Fecha creación", "Cliente"...). Es
+  // independiente de los lineamientos: corre siempre, tenga o no el cliente
+  // algo registrado en el Sheet.
+  // ─────────────────────────────────────────────
+  const RENOMBRES_ETIQUETAS = {
+    'E-mails del cliente para copia de notificaciones': 'E-mails de Copia',
+    'Última Atención Aplicaciones Cliente': 'Ultima visita IA',
+  };
+
+  function renombrarEtiquetas() {
+    document.querySelectorAll('td.key').forEach((celda) => {
+      const actual = (celda.textContent || '').trim();
+      const nuevo = RENOMBRES_ETIQUETAS[actual];
+      if (nuevo) celda.textContent = nuevo;
+    });
   }
 
   // ─────────────────────────────────────────────
@@ -259,8 +278,12 @@
       });
   }
 
-  const observador = new MutationObserver(() => intentarInyectar());
+  const observador = new MutationObserver(() => {
+    renombrarEtiquetas();
+    intentarInyectar();
+  });
   observador.observe(document.body, { childList: true, subtree: true });
+  renombrarEtiquetas();
   intentarInyectar();
 
   console.log('[Lineamientos Cliente] v' + APP_VERSION + ' cargado.');
