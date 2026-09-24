@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.1
+// @version      16.2
 // @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.1';
+    var APP_VERSION = '16.2';
 
     var columnasPorFilaLecturas = 3;
 
@@ -1095,7 +1095,10 @@
             obtenerTextoPlantilla(plantilla, function(texto) {
                 if (texto) {
                     cargarPlantillaDiagnostico(sufijo, parsearPlantilla(texto));
-                    select.value = '';
+                    // Ojo: a propósito NO se limpia el <select> (select.value = '')
+                    // después de cargar. Se deja la opción elegida visible para que
+                    // el técnico vea a simple vista cuál plantilla quedó cargada en
+                    // esta Revisión.
                 }
                 botonCargar.disabled = false;
                 botonCargar.innerText = textoOriginalBoton;
@@ -1104,6 +1107,12 @@
 
         barra.appendChild(select);
         barra.appendChild(botonCargar);
+        // Marca la propia barra con el sufijo de Revisión al que pertenece.
+        // Esto es lo que se usa para detectar duplicados (ver más abajo),
+        // en vez de una bandera puesta sobre el campo de texto: así funciona
+        // aunque el campo termine siendo reemplazado por otro nodo del DOM
+        // (por ejemplo si un editor de texto enriquecido lo reconstruye).
+        barra.dataset.hannaPlantillaBarraSufijo = sufijo;
         return barra;
     }
 
@@ -1111,26 +1120,27 @@
     // MISMO en la página (uno por cada Revisión activada) y le agrega su
     // propio selector de plantilla al que todavía no lo tenga.
     //
-    // La marca "hannaPlantillaInyectada" queda escrita en el propio elemento
-    // del DOM (no solo en una variable de memoria): así, si Tampermonkey
-    // llegara a ejecutar el script dos veces sobre la misma página (por
-    // ejemplo, tras una actualización sin recargar del todo), la segunda
-    // ejecución ve la marca ya puesta y no vuelve a insertar la barra.
-    var revisionesConSelectorPlantilla = {};
-
+    // El chequeo de "¿ya existe una barra para esta Revisión?" se hace
+    // buscando en TODO el documento una barra con ese mismo sufijo
+    // (data-hanna-plantilla-barra-sufijo), en vez de confiar solo en una
+    // bandera puesta sobre el campo de texto o en una variable en memoria.
+    // Esto evita que se dupliquen las barras si el MutationObserver dispara
+    // varias veces seguidas mientras se arma la página, o si algo (como un
+    // editor enriquecido) reconstruye el campo de texto original.
     function intentarInyectarPlantillasDiagnostico() {
         var campos = document.querySelectorAll('[id^="' + ID_BASE_ESTADO_EXTERNO + '"]');
         campos.forEach(function(campoExterno) {
             var sufijo = campoExterno.id.slice(ID_BASE_ESTADO_EXTERNO.length);
-            if (!sufijo || revisionesConSelectorPlantilla[sufijo] || campoExterno.dataset.hannaPlantillaInyectada) return;
+            if (!sufijo) return;
+
+            var yaExiste = document.querySelector('[data-hanna-plantilla-barra-sufijo="' + sufijo + '"]');
+            if (yaExiste) return;
 
             var barra = crearSelectorPlantillaDiagnostico(sufijo);
             var contenedor = campoExterno.closest('.form-item') || campoExterno.parentElement;
             if (!contenedor || !contenedor.parentNode) return;
 
-            campoExterno.dataset.hannaPlantillaInyectada = '1';
             contenedor.parentNode.insertBefore(barra, contenedor);
-            revisionesConSelectorPlantilla[sufijo] = true;
         });
     }
 
