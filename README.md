@@ -266,6 +266,26 @@ Si algo no te queda claro o prefieres no tocar el código, mándame el `.txt` co
 
 Los 5 campos se ubican por el patrón de su `id` HTML (ej. `edit-diagnostico-preliminar-estado-fisico-externo-1`, donde `1` es el número de Revisión). Si la intranet cambia esos ids, hay que actualizar el arreglo `CAMPOS_DIAGNOSTICO` en el script — inspecciona el campo con clic derecho → Inspeccionar y avísale a Brayan el nuevo `id`.
 
+### Resaltado en vivo de HTML (desde v16.7)
+
+Los 5 campos de Diagnóstico Preliminar guardan las etiquetas HTML (`<b>`, `<mark style="...">`) que el sistema interpreta al generar el informe — pero mientras se escribe, el campo solo muestra texto plano, así que un `>` faltante o una etiqueta sin cerrar no se nota hasta que el informe ya salió mal formateado.
+
+Desde v16.7, el script pinta esas etiquetas directamente encima del campo (una capa visual: lo que se guarda no cambia) y agrega, justo debajo, un aviso en rojo si detecta algo roto — por ejemplo:
+
+> ⚠️ Falta el ">" que cierra una etiqueta (línea 3)
+
+Esto corre en vivo mientras se escribe o se carga una plantilla, en los 5 campos de cada Revisión. Si algo se ve desalineado (el texto que aparece no coincide con donde está el cursor), avísale a Brayan — la capa de resaltado copia el tamaño de letra/relleno del campo real, pero cada Revisión nueva que agregue la intranet vale la pena confirmarla una vez.
+
+Desde v16.10, la misma validación también corre en:
+- **Mediciones Iniciales/Finales**: los 3 campos de cada fila (valor, ayuda, tolerancia) — el marcador de resultado (✔ / ✘ / Inestable) que agrega el botón "●" es HTML (`<b><FONT COLOR="...">...</FONT></b>`), y ahí es donde más se nota si algo queda mal escrito.
+- **Soluciones Estándar**: los 4 campos de cada fila (código, lote, vencimiento, descripción).
+
+Estos campos son `<input>` angostos (no `<textarea>` como Diagnóstico Preliminar), así que desde v16.11 NO muestran el texto coloreado por dentro — un campo tan angosto como "Referencia del equipo" lo cortaba feo contra el borde. En vez de eso, si hay algo roto el campo se marca con un **contorno rojo** y aparece el mismo aviso flotante debajo explicando qué falta; el campo real no se toca en nada más (nada de texto transparente ni capa encima), así que no hay riesgo de desalinear el cursor.
+
+Herramienta aparte para revisar el `.txt` de una plantilla completa antes de subirla a GitHub (mismo resaltado + valida que el nombre de cada sección `###...###` sea uno de los que espera el script): pídele a Brayan el link del "Validador de Plantillas".
+
+Desde v16.13, los 5 campos de Diagnóstico Preliminar (solo esos — no Mediciones ni Soluciones) también muestran un **contador de líneas** a la izquierda, como en un editor de código, con el mismo fondo blanco de siempre (no se agregó ningún panel de color nuevo) y una línea muy tenue separándolo del texto. El contador numera por línea del texto (separada por saltos de línea reales), igual que dice el aviso de error ("línea N") — si una línea muy larga se envuelve en varias filas dentro del campo, el número de la siguiente línea puede no quedar pegado exactamente a esa fila envuelta; es una simplificación aceptada.
+
 ## Lineamientos del Cliente: aviso por NIT desde Google Sheets
 
 En la página **"Ver Detalle"** de una OT (`.../stecnico/item/12345`, sin ningún sufijo — no aparece en la pestaña "Diagnóstico" ni en las demás pestañas), el script busca el NIT del cliente en la página y, si tiene lineamientos especiales registrados, muestra una tarjeta amarilla justo debajo de la tarjeta de "Estado" con el resumen, agrupado por categoría. Si el cliente no tiene nada registrado, no aparece ninguna tarjeta — no estorba en el resto de las OT.

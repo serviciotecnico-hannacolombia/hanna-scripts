@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.12
+// @version      16.13
 // @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.12';
+    var APP_VERSION = '16.13';
 
     var columnasPorFilaLecturas = 3;
 
@@ -1164,6 +1164,10 @@
         'boxSizing', 'tabSize'
     ];
 
+    // Ancho del contador de líneas (regla), solo para los 5 campos grandes
+    // de Diagnóstico Preliminar. No aplica a Mediciones/Soluciones.
+    var ANCHO_REGLA = 32;
+
     // Oculta la barra de scroll propia de la capa de resaltado (el scroll
     // real que usa el técnico es el del campo real, que queda encima; el de
     // la capa solo se sincroniza por código para que el texto no se desfase
@@ -1243,6 +1247,54 @@
         capa.style.height = campo.offsetHeight + 'px';
     }
 
+    // La regla (contador de líneas) ocupa la misma franja izquierda que el
+    // padding extra que se le agregó al campo (ver activarResaltadoCompleto),
+    // así que queda pegada al borde izquierdo del campo, con el mismo alto.
+    function sincronizarReglaConCampo(campo, regla) {
+        regla.style.left = campo.offsetLeft + 'px';
+        regla.style.top = campo.offsetTop + 'px';
+        regla.style.height = campo.offsetHeight + 'px';
+    }
+
+    // Crea el contador de líneas: mismo fondo blanco del campo (no se agrega
+    // ningún panel de color nuevo, tal como se pidió), números en gris suave
+    // y una línea muy tenue a la derecha solo para separar visualmente el
+    // contador del texto — sin tocar el fondo de la página.
+    function crearRegla(estilo, fondoOriginal) {
+        var regla = document.createElement('div');
+        regla.className = 'hanna-resaltado-regla';
+        regla.setAttribute('aria-hidden', 'true');
+        regla.style.position = 'absolute';
+        regla.style.zIndex = '0';
+        regla.style.width = ANCHO_REGLA + 'px';
+        regla.style.overflow = 'hidden';
+        regla.style.boxSizing = 'border-box';
+        regla.style.background = fondoOriginal;
+        regla.style.borderRight = '1px solid rgba(0,0,0,0.12)';
+        regla.style.color = '#9aa0a6';
+        regla.style.textAlign = 'right';
+        regla.style.paddingRight = '4px';
+        regla.style.whiteSpace = 'pre';
+        regla.style.pointerEvents = 'none';
+        regla.style.fontFamily = estilo.fontFamily;
+        regla.style.fontSize = estilo.fontSize;
+        regla.style.lineHeight = estilo.lineHeight;
+        regla.style.paddingTop = estilo.paddingTop;
+        return regla;
+    }
+
+    // Numera por línea LÓGICA (separada por \n), igual que los mensajes de
+    // error ("línea N"). Si una línea larga se envuelve en varias filas
+    // visuales dentro del campo, el número de la siguiente línea puede no
+    // quedar exactamente al lado de su primera fila visual — es una
+    // simplificación aceptada, igual que hacen muchos editores sencillos.
+    function actualizarRegla(campo, regla) {
+        var totalLineas = campo.value.split('\n').length;
+        var numeros = [];
+        for (var i = 1; i <= totalLineas; i++) numeros.push(i);
+        regla.textContent = numeros.join('\n');
+    }
+
     function sincronizarAvisoConCampo(campo, aviso) {
         aviso.style.left = campo.offsetLeft + 'px';
         aviso.style.top = (campo.offsetTop + campo.offsetHeight + 3) + 'px';
@@ -1276,6 +1328,22 @@
         var colorOriginalTexto = estilo.color;
         var fondoOriginal = estilo.backgroundColor;
 
+        // Se reserva el espacio del contador DENTRO del propio campo,
+        // agrandando su padding-izquierdo, en vez de agregar un elemento
+        // nuevo al lado (un envoltorio nuevo fue justo lo que rompió el
+        // ancho de Mediciones/Soluciones — ver notas de v16.12 arriba).
+        // Se fuerza box-sizing:border-box ANTES de sumar el padding para
+        // que ese padding extra se "coma" espacio interno en vez de sumar
+        // ancho por fuera, así el ancho total visible del campo no cambia.
+        var paddingIzquierdoOriginalPx = parseFloat(estilo.paddingLeft) || 0;
+        campo.style.boxSizing = 'border-box';
+        campo.style.paddingLeft = (paddingIzquierdoOriginalPx + ANCHO_REGLA) + 'px';
+        // OJO: estilo (getComputedStyle) es un objeto "vivo" — a partir de
+        // aquí, estilo.paddingLeft/estilo.boxSizing ya reflejan los valores
+        // recién puestos, así que la capa (más abajo) copia automáticamente
+        // el padding nuevo y el texto coloreado queda alineado con el texto
+        // real del campo, corrido hacia la derecha del contador.
+
         var capa = document.createElement('div');
         capa.className = 'hanna-resaltado-capa';
         capa.setAttribute('aria-hidden', 'true');
@@ -1302,16 +1370,21 @@
         campo.style.webkitTextFillColor = 'transparent';
         campo.style.caretColor = (colorOriginalTexto && colorOriginalTexto.indexOf('rgba(0, 0, 0, 0)') === -1 && colorOriginalTexto !== 'transparent') ? colorOriginalTexto : '#000';
 
+        var regla = crearRegla(estilo, fondoOriginal);
+        padre.insertBefore(regla, campo);
+
         var aviso = crearAvisoFlotante();
         padre.appendChild(aviso);
 
         function sincronizarGeometria() {
             sincronizarCapaConCampo(campo, capa);
+            sincronizarReglaConCampo(campo, regla);
             sincronizarAvisoConCampo(campo, aviso);
         }
 
         function actualizar() {
             capa.innerHTML = generarHTMLResaltado(campo.value, true);
+            actualizarRegla(campo, regla);
             sincronizarGeometria();
             var problemas = calcularProblemasHTML(campo.value);
             if (problemas.length === 0) {
@@ -1326,6 +1399,7 @@
         campo.addEventListener('scroll', function() {
             capa.scrollTop = campo.scrollTop;
             capa.scrollLeft = campo.scrollLeft;
+            regla.scrollTop = campo.scrollTop;
         });
 
         observarGeometria(campo, sincronizarGeometria);
