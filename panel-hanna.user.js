@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.16
+// @version      16.17
 // @description  Panel completo: Mediciones/Soluciones/Plantillas de Diagnóstico 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.16';
+    var APP_VERSION = '16.17';
 
     var columnasPorFilaLecturas = 3;
 
@@ -1780,6 +1780,12 @@
     // ningún panel de color nuevo, tal como se pidió), números en gris suave
     // y una línea muy tenue a la derecha solo para separar visualmente el
     // contador del texto — sin tocar el fondo de la página.
+    //
+    // Los números YA NO se ponen como texto plano de una franja con
+    // "lineHeight" uniforme (ver nota en actualizarRegla): cada número es un
+    // <div> propio, position:absolute, puesto a la altura EXACTA donde
+    // arranca su línea. Por eso esta franja no necesita padding-top/right ni
+    // salto de línea propio: cada número trae su posición ya calculada.
     function crearRegla(estilo, fondoOriginal) {
         var regla = document.createElement('div');
         regla.className = 'hanna-resaltado-regla';
@@ -1792,27 +1798,69 @@
         regla.style.background = fondoOriginal;
         regla.style.borderRight = '1px solid rgba(0,0,0,0.12)';
         regla.style.color = '#9aa0a6';
-        regla.style.textAlign = 'right';
-        regla.style.paddingRight = '4px';
-        regla.style.whiteSpace = 'pre';
         regla.style.pointerEvents = 'none';
         regla.style.fontFamily = estilo.fontFamily;
         regla.style.fontSize = estilo.fontSize;
         regla.style.lineHeight = estilo.lineHeight;
-        regla.style.paddingTop = estilo.paddingTop;
         return regla;
     }
 
-    // Numera por línea LÓGICA (separada por \n), igual que los mensajes de
-    // error ("línea N"). Si una línea larga se envuelve en varias filas
-    // visuales dentro del campo, el número de la siguiente línea puede no
-    // quedar exactamente al lado de su primera fila visual — es una
-    // simplificación aceptada, igual que hacen muchos editores sencillos.
-    function actualizarRegla(campo, regla) {
-        var totalLineas = campo.value.split('\n').length;
-        var numeros = [];
-        for (var i = 1; i <= totalLineas; i++) numeros.push(i);
-        regla.textContent = numeros.join('\n');
+    // Elemento invisible (nunca se ve, no ocupa espacio en el layout) que
+    // sirve solo para MEDIR dónde envuelve realmente el texto. Copia las
+    // mismas propiedades que la capa de resaltado (fuente, relleno, ancho,
+    // "white-space: pre-wrap"...), así que el texto se envuelve dentro de
+    // él exactamente igual que dentro del campo real.
+    function crearMedidorLineas(estilo) {
+        var medidor = document.createElement('div');
+        medidor.className = 'hanna-resaltado-medidor';
+        medidor.setAttribute('aria-hidden', 'true');
+        medidor.style.position = 'absolute';
+        medidor.style.visibility = 'hidden';
+        medidor.style.left = '0';
+        medidor.style.top = '0';
+        medidor.style.height = 'auto';
+        medidor.style.margin = '0';
+        medidor.style.overflow = 'visible';
+        medidor.style.whiteSpace = 'pre-wrap';
+        medidor.style.wordWrap = 'break-word';
+        medidor.style.pointerEvents = 'none';
+        PROPIEDADES_A_COPIAR_RESALTADO.forEach(function(prop) { medidor.style[prop] = estilo[prop]; });
+        return medidor;
+    }
+
+    // Antes esta función numeraba por línea LÓGICA (separada por \n) con un
+    // salto de línea por número y un mismo "lineHeight" para todas — eso
+    // asumía que cada línea del texto ocupa exactamente UNA fila visual
+    // dentro del campo. Con párrafos largos que se envuelven en varias
+    // filas, esa suposición fallaba y el número de cada línea siguiente
+    // quedaba cada vez más atrasado respecto a su fila real (justo lo que
+    // se reportó: "si la línea es muy larga el número queda atrás").
+    //
+    // Ahora cada número se ubica en la altura REAL donde arranca su línea:
+    // se arma en el "medidor" invisible el mismo texto con un marcador de
+    // ancho cero al inicio de cada línea, se deja que el navegador lo
+    // envuelva (con la misma fuente/ancho/relleno que el campo real), y se
+    // mide con getBoundingClientRect() en qué posición vertical quedó cada
+    // marcador. Esa posición es la que usa el número correspondiente.
+    function actualizarRegla(campo, regla, medidor) {
+        var lineas = campo.value.split('\n');
+
+        medidor.style.width = campo.offsetWidth + 'px';
+        var marcado = [];
+        for (var i = 0; i < lineas.length; i++) {
+            marcado.push('<span class="hanna-marca-linea">​</span>' + escaparHTML(lineas[i]));
+        }
+        medidor.innerHTML = marcado.join('\n');
+
+        var marcas = medidor.getElementsByClassName('hanna-marca-linea');
+        var medidorTop = medidor.getBoundingClientRect().top;
+        var html = '';
+        for (var j = 0; j < marcas.length; j++) {
+            var offset = marcas[j].getBoundingClientRect().top - medidorTop;
+            html += '<div style="position:absolute;left:0;right:4px;top:' + offset +
+                'px;text-align:right;white-space:nowrap;overflow:hidden;">' + (j + 1) + '</div>';
+        }
+        regla.innerHTML = html;
     }
 
     function sincronizarAvisoConCampo(campo, aviso) {
@@ -1893,6 +1941,11 @@
         var regla = crearRegla(estilo, fondoOriginal);
         padre.insertBefore(regla, campo);
 
+        // Elemento de medición: nunca es visible, solo se usa para calcular
+        // dónde envuelve realmente cada línea (ver actualizarRegla).
+        var medidor = crearMedidorLineas(estilo);
+        padre.appendChild(medidor);
+
         var aviso = crearAvisoFlotante();
         padre.appendChild(aviso);
 
@@ -1900,11 +1953,16 @@
             sincronizarCapaConCampo(campo, capa);
             sincronizarReglaConCampo(campo, regla);
             sincronizarAvisoConCampo(campo, aviso);
+            // El ancho del campo pudo cambiar (el técnico agranda el
+            // <textarea> arrastrando la esquina, o cambia el tamaño de la
+            // ventana), lo cual cambia dónde envuelve cada línea larga —
+            // por eso los números se recalculan también aquí, no solo al
+            // escribir.
+            actualizarRegla(campo, regla, medidor);
         }
 
         function actualizar() {
             capa.innerHTML = generarHTMLResaltado(campo.value, true);
-            actualizarRegla(campo, regla);
             sincronizarGeometria();
             var problemas = calcularProblemasHTML(campo.value);
             if (problemas.length === 0) {

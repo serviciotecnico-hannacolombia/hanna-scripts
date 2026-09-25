@@ -300,7 +300,9 @@ Estos campos son `<input>` angostos (no `<textarea>` como Diagnóstico Prelimina
 
 Herramienta aparte para revisar el `.txt` de una plantilla completa antes de subirla a GitHub (mismo resaltado + valida que el nombre de cada sección `###...###` sea uno de los que espera el script): pídele a Brayan el link del "Validador de Plantillas".
 
-Desde v16.13, los 5 campos de Diagnóstico Preliminar (solo esos — no Mediciones ni Soluciones) también muestran un **contador de líneas** a la izquierda, como en un editor de código, con el mismo fondo blanco de siempre (no se agregó ningún panel de color nuevo) y una línea muy tenue separándolo del texto. El contador numera por línea del texto (separada por saltos de línea reales), igual que dice el aviso de error ("línea N") — si una línea muy larga se envuelve en varias filas dentro del campo, el número de la siguiente línea puede no quedar pegado exactamente a esa fila envuelta; es una simplificación aceptada.
+Desde v16.13, los 5 campos de Diagnóstico Preliminar (solo esos — no Mediciones ni Soluciones) también muestran un **contador de líneas** a la izquierda, como en un editor de código, con el mismo fondo blanco de siempre (no se agregó ningún panel de color nuevo) y una línea muy tenue separándolo del texto. El contador numera por línea del texto (separada por saltos de línea reales), igual que dice el aviso de error ("línea N").
+
+Desde v16.17, el número de cada línea queda pegado a su fila real aunque el párrafo sea largo y se envuelva en varias filas visuales dentro del campo (antes, en v16.13-v16.16, el contador asumía que cada línea ocupaba exactamente una fila, así que después del primer párrafo largo los números quedaban cada vez más atrasados respecto al texto). Ahora la posición de cada número se calcula midiendo dónde envuelve realmente el texto, no contando líneas de forma uniforme.
 
 ## Lineamientos del Cliente: aviso por NIT desde Google Sheets
 
