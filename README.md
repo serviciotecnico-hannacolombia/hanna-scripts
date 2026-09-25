@@ -108,6 +108,14 @@ y reemplaza ambos placeholders. Sube el `@version`, commit y push.
 - El botón ✏️ abre el Sheet directamente para editar.
 - Cualquiera con permiso de edición en el Sheet puede agregar, quitar o cambiar una fila (código, lote, vencimiento, parámetro o descripción) y, en el siguiente refresh (automático o con el botón 🔄), todos los navegadores lo ven — sin tocar código ni GitHub.
 
+### El panel de checkboxes, desde v16.14
+
+Este mismo panel (usado tanto por Soluciones Estándar como por Mediciones Iniciales/Finales, ver abajo) tuvo dos mejoras pensadas para cuando la lista de checkboxes crece mucho:
+
+- **Categorías plegadas por defecto**: antes, al abrir "Elegir…", se veían TODOS los checkboxes de TODAS las categorías de una vez. Ahora cada categoría (ej. "pH", "Conductividad") empieza plegada, mostrando solo su título con la cantidad de opciones entre paréntesis — un clic la despliega para marcar, otro clic la vuelve a plegar.
+- **Buscador**: arriba de la lista hay un campo "🔍 Buscar...". Al escribir, se filtran en vivo los checkboxes que coinciden (por su texto o por el nombre de la categoría) y se despliegan automáticamente solo esas categorías; al borrar la búsqueda, cada categoría vuelve a quedar como la habías dejado (abierta o plegada). Nada de lo que ya hayas marcado se pierde al buscar, aunque quede oculto momentáneamente por el filtro.
+- **El panel ahora flota** sobre la página en vez de empujarla hacia abajo al abrirse — se cierra solo si haces clic afuera o con la tecla Escape, además de con "Cancelar" o después de cargar tu selección.
+
 ## Mediciones Iniciales/Finales: panel de checkboxes 100% dinámico desde Google Sheets
 
 Desde v15.0, "Mediciones Iniciales" y "Mediciones Finales" funcionan igual que Soluciones Estándar: ya no hay "recetas" fijas escritas en el código (`ph_temp_1dec`, `multi_completo`, etc.). En su lugar, cada punto de lectura individual (un pH, una conductividad, una temperatura...) vive como una fila en una pestaña del Sheet, y el técnico arma la combinación que necesite marcando checkboxes.
@@ -164,13 +172,17 @@ Al elegir una, se agrega al final de lo que ya estaba escrito en ese campo (ej. 
 
 Desde v16.3, **Mediciones Iniciales/Finales** funcionan igual de bien si activas un segundo, tercer... informe de Revisión en la misma página (antes solo funcionaba el primero). El sitio nombra los campos de cada Revisión como `mediciones_iniciales[N][fila][columna]` (confirmado inspeccionando un campo real: `mediciones_iniciales[2][1][1]`), así que el script detecta cuántas Revisiones hay activas ahora mismo y le pone su **propio** panel de checkboxes a cada una — eligen y cargan de forma totalmente independiente, sin mezclar datos entre Revisiones. Cuando hay más de una, el botón de cada panel se etiqueta "(Revisión 2)", "(Revisión 3)"... para que no haya confusión sobre cuál es cuál.
 
-⚠️ **Soluciones Estándar todavía NO tiene este soporte** (sigue siendo un solo panel para toda la página, como antes de v16.3). Se intentó generalizarlo igual que Mediciones asumiendo el mismo patrón de nombres, pero los datos reales mostraron que aquí cada columna (Código, Lote, Fecha de Expiración, Descripción) es un campo con su **propio** nombre — no comparten un mismo prefijo con número de Revisión — así que no hay (todavía) una forma confiable de saber a cuál Revisión pertenece cada tabla. Si necesitas usar Soluciones Estándar en una Revisión distinta a la 1, avísale a Brayan con el `name` real de un campo de esa tabla en esa Revisión (clic derecho → Inspeccionar) para poder revisar si hay forma de identificarla.
+Desde v16.14, **Soluciones Estándar** también tiene este soporte: se confirmó con un campo real del Informe 2 (`soluciones_codigo[2][1]`) que sí trae el número de Revisión entre corchetes, igual que Mediciones — antes de eso el botón "🧴 Elegir Soluciones Estándar…" solo alcanzaba a aparecer en el primer Informe de la página, y en el Informe 2, 3, etc. no salía. Ahora cada Revisión tiene su propio botón y panel, sin mezclar datos entre tablas.
 
 ## Plantillas de "Diagnóstico Preliminar" por tipo de equipo (desde GitHub)
 
 Desde v16.0 (y usando GitHub en vez de Drive desde v16.1), el bloque "Diagnóstico Preliminar" (Estado físico externo/interno, Descripción del procedimiento efectuado, Método de Verificación, Observaciones y recomendaciones) se puede llenar de una sola vez con un botón **"📋 Elegir plantilla de diagnóstico… → ➕ Cargar"**, según el tipo de equipo.
 
 Desde v16.6, cargar una plantilla **se agrega** al final de lo que ya haya en cada campo (separado por una línea en blanco) — igual que Soluciones/Mediciones — así que se pueden **combinar varias plantillas** en la misma Revisión (por ejemplo, la del medidor + la de la sonda). Debajo del selector aparece un aviso tipo *"Se cargaron: Tester pH/ORP/CE (HI 9XXXX), Oxímetro portátil"* con el nombre de cada una que se haya cargado ahí, en orden. Antes de v16.6 el botón reemplazaba todo el contenido y preguntaba primero si ya había texto — eso ya no aplica.
+
+Desde v16.15, el desplegable dejó de ser un `<select>` nativo y es el mismo combo-con-buscador de Soluciones/Mediciones: un botón que muestra la plantilla elegida (o el texto de siempre) y que, al hacer clic, abre un panel flotante con un buscador arriba y la lista de tipos de equipo debajo. Sigue funcionando igual (elige y dale "➕ Cargar"), pero ahora se puede filtrar por nombre a medida que crezca la lista de plantillas.
+
+Desde v16.16, esa lista **ya NO está escrita en el código** (ver v16.6-16.15 más abajo para el historial): sale en vivo de una pestaña del mismo Google Sheet que ya usan Soluciones y Mediciones, agrupada por categoría (Tester, Multiparámetro, Sonda, Oxímetro, o la que uses). Agregar un tipo de equipo nuevo es: subir el `.txt` a GitHub + agregar una fila al Sheet — **cero cambios de código**. El detalle completo está en "Agregar un equipo nuevo" más abajo.
 
 > **Por qué GitHub y no Google Drive:** se probó primero con links de descarga directa de Drive, pero Drive no permite que un script de OTRO sitio (`intranet.hannacolombia.com`) descargue el archivo — el navegador lo bloquea por CORS, aunque el archivo sea público. GitHub (`raw.githubusercontent.com`) sí lo permite, y ya es la infraestructura que usan los `.user.js` de este mismo repo.
 
@@ -233,34 +245,38 @@ No hace falta instalar nada ni usar la terminal — todo se hace desde la págin
 4. Arrastra tu `.txt` a la página (o clic en "choose your files" y búscalo).
 5. Abajo, en "Commit changes", escribe algo corto como *"Agregar plantilla medidor HI 9829"* y dale clic al botón verde **"Commit changes"**.
 
-#### Parte 3: Avísale al menú del script que existe esa plantilla nueva
+#### Parte 3: Agrega la fila en el Sheet (desde v16.16, sin tocar código)
 
-1. En el repo, abre el archivo **`panel-hanna.user.js`**.
-2. Clic en el ícono del lápiz ✏️ (arriba a la derecha del archivo) para editarlo ahí mismo, en el navegador.
-3. Con `Ctrl+F` (o `Cmd+F` en Mac) busca el texto `PLANTILLAS_DIAGNOSTICO` — te lleva directo al bloque que se ve así:
-   ```js
-   var PLANTILLAS_DIAGNOSTICO = [
-       { clave: 'tester_ph_orp_ce', etiqueta: '🧪 Tester pH/ORP/CE (HI 9XXXX)', url: GITHUB_PLANTILLAS_BASE + 'tester-ph-orp-ce.txt' },
-       ...
-       { clave: 'oximetro_portatil', etiqueta: '🧪 Oxímetro portátil', url: GITHUB_PLANTILLAS_BASE + 'oximetro-portatil.txt' }
-   ];
-   ```
-4. Justo después de la última línea de ese bloque (la que termina en `oximetro-portatil.txt' }`), agrega una línea nueva copiando el mismo formato:
-   ```js
-   { clave: 'medidor_hi_9829', etiqueta: '🧪 Medidor HI 9829', url: GITHUB_PLANTILLAS_BASE + 'medidor-hi-9829.txt' },
-   ```
-   - `clave`: un nombre corto interno, sin espacios (no lo ve el técnico).
-   - `etiqueta`: el texto que SÍ va a ver el técnico en el desplegable.
-   - el nombre del `.txt` después de `GITHUB_PLANTILLAS_BASE +` debe coincidir exactamente con el archivo que subiste en la Parte 2 (mayúsculas, guiones, todo igual).
-   - ⚠️ No olvides la coma `,` al final de la línea, ni las comillas `'...'`.
-5. Ahora sube la versión, para que a todos les llegue la actualización: con `Ctrl+F` busca `@version` (aparece cerca del inicio del archivo) y súbele 0.1 (ej. `16.4` → `16.5`). Un poco más abajo busca `APP_VERSION = ` y ponle el MISMO número ahí también (tienen que quedar iguales los dos).
-6. Baja hasta el final de la página, escribe un mensaje corto en "Commit changes" (ej. *"Agregar plantilla medidor HI 9829 al menú"*) y dale clic al botón verde **"Commit changes"**.
+1. Abre el Sheet (botón "✏️ Abrir Sheet de lotes" del panel, o el link de siempre) y ve a la pestaña **`plantillas`**.
+2. Agrega una fila nueva con estas 3 columnas:
+
+   | categoria | etiqueta | archivo |
+   |---|---|---|
+   | Medidor | 🧪 Medidor HI 9829 | medidor-hi-9829.txt |
+
+   - **`categoria`**: agrupa el buscador (puedes reusar una que ya exista — Tester, Multiparámetro, Sonda, Oxímetro — o inventar una nueva).
+   - **`etiqueta`**: el texto que va a ver el técnico (el emoji lo escribes tú directamente en la celda).
+   - **`archivo`**: el nombre EXACTO del `.txt` que subiste en la Parte 2 (mayúsculas, guiones, todo igual) — solo el nombre, no la ruta completa.
+3. Listo. En el panel, el técnico le da a "🔄 Recargar datos del Sheet" (o recarga la página) y ya aparece la plantilla nueva agrupada bajo su categoría.
+
+No hace falta subir versión ni tocar `panel-hanna.user.js` para esto — solo para cambios de comportamiento del script.
 
 #### Para probarlo
 
-Espera unos minutos (o en Tampermonkey, ícono de la extensión → **Dashboard** → menú **☰ → Utilities → Check for userscript updates**) y recarga la página de la intranet. Abre un informe, en "Diagnóstico Preliminar" debería aparecer tu plantilla nueva en el desplegable — selecciónala, dale "➕ Cargar" y revisa que los 5 campos se llenen bien.
+Recarga la página de la intranet (o dale "🔄 Recargar datos del Sheet" en el panel). Abre un informe, en "Diagnóstico Preliminar" debería aparecer tu categoría/plantilla nueva en el buscador — selecciónala, dale "➕ Cargar" y revisa que los 5 campos se llenen bien.
 
-Si algo no te queda claro o prefieres no tocar el código, mándame el `.txt` con las 5 secciones y el nombre que quieres que aparezca en el desplegable, y yo dejo listo el paso 3.
+Si algo no te queda claro, mándame el `.txt` con las 5 secciones y el nombre/categoría que quieres que aparezca, y yo agrego la fila.
+
+### La pestaña "plantillas" del Sheet (desde v16.16)
+
+Igual que Soluciones/Mediciones, esta lista ya no vive en el código: sale de una pestaña **`plantillas`** del mismo Google Sheet, con estas columnas exactas, en este orden, con encabezado en la fila 1:
+```
+categoria	etiqueta	archivo
+```
+- Cada fila es un tipo de equipo. `archivo` es solo el nombre del `.txt` en `plantillas-diagnostico/` (el script arma la URL completa solo).
+- Publícala igual que las otras dos pestañas: **Archivo → Compartir → Publicar en la web → elige la pestaña "plantillas" → formato CSV → copia el link**, y pégalo en `SHEET_PLANTILLAS_CSV_URL` dentro del script (junto a `SHEET_CSV_URL` y `SHEET_LECTURAS_CSV_URL`, sección "0c" del código).
+- Si el Sheet no responde (sin internet, o la pestaña no se publicó), el panel usa la última copia guardada en caché del navegador; y si tampoco hay caché, arranca con las 5 plantillas originales como respaldo, para que el técnico nunca se quede sin nada que elegir.
+- El botón "🔄 Recargar datos del Sheet" del panel también refresca esta lista, junto con Soluciones y Mediciones.
 
 ### Si el sitio cambia el "id" de algún campo
 

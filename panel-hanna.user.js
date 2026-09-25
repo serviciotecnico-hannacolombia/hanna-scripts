@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.15
-// @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
+// @version      16.16
+// @description  Panel completo: Mediciones/Soluciones/Plantillas de Diagnóstico 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
 // @grant        none
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.15';
+    var APP_VERSION = '16.16';
 
     var columnasPorFilaLecturas = 3;
 
@@ -228,6 +228,77 @@
             });
     }
 
+    // ==========================================
+    // 0c. PLANTILLAS DE DIAGNÓSTICO PRELIMINAR DESDE GOOGLE SHEETS
+    // ==========================================
+    // Misma idea que Soluciones/Mediciones: una pestaña NUEVA ("plantillas")
+    // dentro del MISMO Google Sheet, con estas columnas exactas, en este
+    // orden, con encabezado en la fila 1:
+    //   categoria | etiqueta | archivo
+    // "archivo" es solo el NOMBRE del .txt dentro de la carpeta
+    // plantillas-diagnostico/ de este mismo repo de GitHub (no la URL
+    // completa — el script la arma solo con GITHUB_PLANTILLAS_BASE, que se
+    // define más abajo junto a esa carpeta). Así, agregar un tipo de equipo
+    // nuevo ya NO requiere tocar este archivo: solo subir el .txt a GitHub y
+    // agregar una fila aquí con su nombre bonito y el nombre del archivo.
+
+    var SHEET_PLANTILLAS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT2t_Y1keodEQiK9Iv4C8PoYmkAe-dFDgVek2z4fAr9IACCV-XDzFvB8jnrBB6J5t4uUwgpwn2W9CSz/pub?gid=979403274&single=true&output=csv';
+    var CACHE_KEY_PLANTILLAS = 'hanna_sheet_cache_plantillas_v1';
+    // [{ categoria: "Tester", etiqueta: "🧪 Tester pH/ORP/CE (HI 9XXXX)", archivo: "tester-ph-orp-ce.txt" }, ...]
+    var datosPlantillasSheet = [];
+    var sheetPlantillasUltimaActualizacion = null;
+
+    function aplicarFilasPlantillas(filas) {
+        var nuevo = [];
+        filas.forEach(function(campos) {
+            var categoria = (campos[0] || '').trim();
+            var etiqueta = campos[1], archivo = campos[2];
+            if (!etiqueta || !archivo) return; // fila incompleta: se ignora
+            nuevo.push({
+                categoria: categoria || 'Sin categoría',
+                etiqueta: etiqueta,
+                archivo: archivo.trim()
+            });
+        });
+        datosPlantillasSheet = nuevo;
+    }
+
+    function guardarCachePlantillas(texto) {
+        try {
+            localStorage.setItem(CACHE_KEY_PLANTILLAS, texto);
+            localStorage.setItem(CACHE_KEY_PLANTILLAS + '_ts', new Date().toISOString());
+        } catch (e) { /* localStorage no disponible, seguimos sin cache */ }
+    }
+
+    function cargarCachePlantillas() {
+        try {
+            var texto = localStorage.getItem(CACHE_KEY_PLANTILLAS);
+            var ts = localStorage.getItem(CACHE_KEY_PLANTILLAS + '_ts');
+            if (texto) {
+                aplicarFilasPlantillas(parseCSV(texto));
+                sheetPlantillasUltimaActualizacion = ts ? new Date(ts) : null;
+            }
+        } catch (e) { /* nada que cargar */ }
+    }
+
+    function cargarDatosPlantillasSheet(callback) {
+        if (!SHEET_PLANTILLAS_CSV_URL || SHEET_PLANTILLAS_CSV_URL.indexOf('PEGA_AQUI') === 0) {
+            if (callback) callback(false);
+            return;
+        }
+        fetch(SHEET_PLANTILLAS_CSV_URL, { cache: 'no-store' })
+            .then(function(r) { return r.text(); })
+            .then(function(texto) {
+                aplicarFilasPlantillas(parseCSV(texto));
+                sheetPlantillasUltimaActualizacion = new Date();
+                guardarCachePlantillas(texto);
+                if (callback) callback(true);
+            })
+            .catch(function(err) {
+                console.warn('[Panel Hanna] No se pudo leer el Sheet de plantillas, usando último dato conocido / caché.', err);
+                if (callback) callback(false);
+            });
+    }
 
     // ==========================================
     // 1. BANCO DE DATOS
@@ -1070,16 +1141,23 @@
         return { barra: barra, poblar: poblar };
     }
 
-    // Combo con buscador para elegir UNA sola opción de una lista (a
-    // diferencia de crearPanelChecklist, que es de selección múltiple con
-    // checkboxes). Reemplaza a un <select> nativo, que no deja filtrar
-    // mientras escribes: en vez de eso, un botón muestra la opción elegida
-    // (o el texto de placeholder) y, al hacer clic, abre un panel flotante
-    // con un buscador arriba y la lista debajo — clic en una opción la
-    // elige y cierra el panel. Reutiliza el mismo criterio de "panel
-    // flotante" que crearPanelChecklist (position:absolute, cierra con
-    // clic afuera o Escape) para no empujar la página al abrirse.
-    function crearComboBuscable(opciones, colorBorde, textoPlaceholder) {
+    // Combo con buscador para elegir UNA sola opción de una lista AGRUPADA
+    // por categoría (a diferencia de crearPanelChecklist, que es de
+    // selección múltiple con checkboxes). "opcionesAgrupadas" tiene la misma
+    // forma que espera crearPanelChecklist: [{ categoria, items: [{clave,
+    // etiqueta}] }]. Reemplaza a un <select> nativo, que no deja filtrar ni
+    // agrupar: en vez de eso, un botón muestra la opción elegida (o el texto
+    // de placeholder) y, al hacer clic, abre un panel flotante con un
+    // buscador arriba y las categorías debajo — cada una empieza plegada,
+    // igual que en crearPanelChecklist, y un clic en una opción la elige y
+    // cierra todo el panel. Reutiliza el mismo criterio de "panel flotante"
+    // (position:absolute, cierra con clic afuera o Escape) para no empujar
+    // la página al abrirse.
+    //
+    // Tiene un poblar(opcionesAgrupadas) para poder reconstruir la lista más
+    // tarde (ej. cuando el Sheet del que sale esta lista termina de cargar o
+    // se recarga) sin tener que volver a crear el combo desde cero.
+    function crearComboBuscable(opcionesAgrupadas, colorBorde, textoPlaceholder) {
         var contenedor = document.createElement('div');
         contenedor.style.position = 'relative';
         contenedor.style.display = 'inline-block';
@@ -1153,31 +1231,112 @@
         contenedor.appendChild(panel);
 
         var claveSeleccionada = '';
-        var itemsBusqueda = [];
+        var grupos = [];
 
-        opciones.forEach(function(opcion) {
-            var item = document.createElement('div');
-            item.innerText = opcion.etiqueta;
-            item.style.padding = '6px 8px';
-            item.style.borderRadius = '4px';
-            item.style.cursor = 'pointer';
-            item.onmouseenter = function() { item.style.backgroundColor = '#e9ecef'; };
-            item.onmouseleave = function() { item.style.backgroundColor = ''; };
-            item.onclick = function() {
-                claveSeleccionada = opcion.clave;
-                textoBoton.innerText = opcion.etiqueta;
-                cerrarPanel();
-            };
-            lista.appendChild(item);
-            itemsBusqueda.push({ elemento: item, textoNormalizado: normalizarTextoBusqueda(opcion.etiqueta) });
-        });
+        function poblar(opcionesAgrupadas) {
+            lista.innerHTML = '';
+            grupos = [];
+            claveSeleccionada = '';
+            textoBoton.innerText = textoPlaceholder;
+            buscador.value = '';
 
+            (opcionesAgrupadas || []).forEach(function(grupo) {
+                var grupoDiv = document.createElement('div');
+
+                var titulo = document.createElement('div');
+                titulo.style.display = 'flex';
+                titulo.style.alignItems = 'center';
+                titulo.style.gap = '5px';
+                titulo.style.fontWeight = 'bold';
+                titulo.style.color = '#495057';
+                titulo.style.cursor = 'pointer';
+                titulo.style.padding = '4px 2px';
+                titulo.style.borderBottom = '1px solid #dee2e6';
+                titulo.style.userSelect = 'none';
+
+                var flecha = document.createElement('span');
+                flecha.innerText = '▸';
+                flecha.style.fontSize = '10px';
+                flecha.style.width = '10px';
+                flecha.style.display = 'inline-block';
+
+                var textoTitulo = document.createElement('span');
+                textoTitulo.innerText = grupo.categoria + ' (' + grupo.items.length + ')';
+
+                titulo.appendChild(flecha);
+                titulo.appendChild(textoTitulo);
+                grupoDiv.appendChild(titulo);
+
+                var itemsDiv = document.createElement('div');
+                itemsDiv.style.display = 'none'; // plegado por defecto
+                itemsDiv.style.flexDirection = 'column';
+                itemsDiv.style.padding = '2px 0 4px 15px';
+                grupoDiv.appendChild(itemsDiv);
+
+                var abiertoManual = false;
+                titulo.onclick = function() {
+                    abiertoManual = !abiertoManual;
+                    itemsDiv.style.display = abiertoManual ? 'flex' : 'none';
+                    flecha.innerText = abiertoManual ? '▾' : '▸';
+                };
+
+                var itemsBusqueda = [];
+
+                grupo.items.forEach(function(opcion) {
+                    var item = document.createElement('div');
+                    item.innerText = opcion.etiqueta;
+                    item.style.padding = '6px 8px';
+                    item.style.borderRadius = '4px';
+                    item.style.cursor = 'pointer';
+                    item.onmouseenter = function() { item.style.backgroundColor = '#e9ecef'; };
+                    item.onmouseleave = function() { item.style.backgroundColor = ''; };
+                    item.onclick = function() {
+                        claveSeleccionada = opcion.clave;
+                        textoBoton.innerText = opcion.etiqueta;
+                        cerrarPanel();
+                    };
+                    itemsDiv.appendChild(item);
+                    itemsBusqueda.push({ elemento: item, textoNormalizado: normalizarTextoBusqueda(opcion.etiqueta) });
+                });
+
+                lista.appendChild(grupoDiv);
+                grupos.push({
+                    grupoDiv: grupoDiv, itemsDiv: itemsDiv, flecha: flecha, items: itemsBusqueda,
+                    categoriaNormalizada: normalizarTextoBusqueda(grupo.categoria),
+                    estaAbierto: function() { return abiertoManual; }
+                });
+            });
+        }
+
+        // Igual que en crearPanelChecklist: al escribir se despliegan solo
+        // las categorías con resultados (por texto de la opción o por nombre
+        // de categoría) y al borrar la búsqueda cada una vuelve a quedar
+        // como el técnico la había dejado.
         buscador.addEventListener('input', function() {
             var termino = normalizarTextoBusqueda(buscador.value.trim());
-            itemsBusqueda.forEach(function(it) {
-                it.elemento.style.display = (termino === '' || it.textoNormalizado.indexOf(termino) !== -1) ? '' : 'none';
+            grupos.forEach(function(g) {
+                if (termino === '') {
+                    g.grupoDiv.style.display = '';
+                    g.items.forEach(function(it) { it.elemento.style.display = ''; });
+                    var abierto = g.estaAbierto();
+                    g.itemsDiv.style.display = abierto ? 'flex' : 'none';
+                    g.flecha.innerText = abierto ? '▾' : '▸';
+                    return;
+                }
+                var categoriaCoincide = g.categoriaNormalizada.indexOf(termino) !== -1;
+                var algunaCoincide = false;
+                g.items.forEach(function(it) {
+                    var coincide = categoriaCoincide || it.textoNormalizado.indexOf(termino) !== -1;
+                    it.elemento.style.display = coincide ? '' : 'none';
+                    if (coincide) algunaCoincide = true;
+                });
+                g.grupoDiv.style.display = algunaCoincide ? '' : 'none';
+                g.itemsDiv.style.display = algunaCoincide ? 'flex' : 'none';
+                g.flecha.innerText = algunaCoincide ? '▾' : '▸';
             });
         });
+
+        poblar(opcionesAgrupadas);
 
         function alClicFuera(ev) {
             if (!contenedor.contains(ev.target)) cerrarPanel();
@@ -1208,7 +1367,8 @@
 
         return {
             contenedor: contenedor,
-            obtenerValor: function() { return claveSeleccionada; }
+            obtenerValor: function() { return claveSeleccionada; },
+            poblar: poblar
         };
     }
 
@@ -1339,13 +1499,56 @@
     // Tampermonkey para @updateURL/@downloadURL).
     var GITHUB_PLANTILLAS_BASE = 'https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/plantillas-diagnostico/';
 
-    var PLANTILLAS_DIAGNOSTICO = [
-        { clave: 'tester_ph_orp_ce', etiqueta: '🧪 Tester pH/ORP/CE (HI 9XXXX)', url: GITHUB_PLANTILLAS_BASE + 'tester-ph-orp-ce.txt' },
-        { clave: 'multiparametro_sobremesa', etiqueta: '🧪 Multiparámetro de sobremesa', url: GITHUB_PLANTILLAS_BASE + 'multiparametro-sobremesa.txt' },
-        { clave: 'multiparametro_portatil', etiqueta: '🧪 Multiparámetro portátil (HI 98XXX)', url: GITHUB_PLANTILLAS_BASE + 'multiparametro-portatil.txt' },
-        { clave: 'ph_ise_orp_ce_portatil', etiqueta: '🧪 pH/ISE/ORP/CE portátil', url: GITHUB_PLANTILLAS_BASE + 'ph-ise-orp-ce-portatil.txt' },
-        { clave: 'oximetro_portatil', etiqueta: '🧪 Oxímetro portátil', url: GITHUB_PLANTILLAS_BASE + 'oximetro-portatil.txt' }
+    // Ya NO es una lista fija: se construye en vivo desde datosPlantillasSheet
+    // (la pestaña "plantillas" del Sheet, ver sección 0c más arriba), igual
+    // que ya pasa con Soluciones/Mediciones. datosPlantillasSheet arranca con
+    // estas mismas 5 filas como valor por defecto — si el Sheet todavía no
+    // cargó (o algún día no responde y tampoco hay caché), el técnico sigue
+    // viendo estas plantillas conocidas en vez de una lista vacía.
+    datosPlantillasSheet = [
+        { categoria: 'Tester', etiqueta: '🧪 Tester pH/ORP/CE (HI 9XXXX)', archivo: 'tester-ph-orp-ce.txt' },
+        { categoria: 'Multiparámetro', etiqueta: '🧪 Multiparámetro de sobremesa', archivo: 'multiparametro-sobremesa.txt' },
+        { categoria: 'Multiparámetro', etiqueta: '🧪 Multiparámetro portátil (HI 98XXX)', archivo: 'multiparametro-portatil.txt' },
+        { categoria: 'Sonda', etiqueta: '🧪 pH/ISE/ORP/CE portátil', archivo: 'ph-ise-orp-ce-portatil.txt' },
+        { categoria: 'Oxímetro', etiqueta: '🧪 Oxímetro portátil', archivo: 'oximetro-portatil.txt' }
     ];
+
+    // Agrupa datosPlantillasSheet por "categoria", igual criterio que
+    // construirOpcionesLecturasDesdeSheet/construirOpcionesSolucionesDesdeSheet:
+    // un grupo (categoría) por cada valor distinto, en el orden en que
+    // aparecen las filas en el Sheet, y la "clave" de cada ítem es su índice
+    // dentro de datosPlantillasSheet (para poder recuperar la fila completa
+    // después con obtenerPlantillaPorClave).
+    function construirPlantillasAgrupadasDesdeSheet() {
+        var grupos = {};
+        var orden = [];
+        datosPlantillasSheet.forEach(function(fila, indice) {
+            var categoria = fila.categoria || 'Sin categoría';
+            if (!grupos[categoria]) { grupos[categoria] = []; orden.push(categoria); }
+            grupos[categoria].push({ clave: String(indice), etiqueta: fila.etiqueta });
+        });
+        return orden.map(function(categoria) {
+            return { categoria: categoria, items: grupos[categoria] };
+        });
+    }
+
+    // Recupera la plantilla completa (con la URL ya armada) a partir de la
+    // "clave" (índice) que devuelve el combo-con-buscador al elegir una.
+    function obtenerPlantillaPorClave(clave) {
+        var fila = datosPlantillasSheet[Number(clave)];
+        if (!fila) return null;
+        return { clave: clave, etiqueta: fila.etiqueta, url: GITHUB_PLANTILLAS_BASE + fila.archivo, archivo: fila.archivo };
+    }
+
+    // Uno por cada combo de "Elegir plantilla de diagnóstico…" inyectado (uno
+    // por Revisión), para poder refrescarlos todos cuando el Sheet cambie o
+    // se recargue — igual que panelesSolucionesRef/panelesLecturasIniRef.
+    var combosPlantillasRef = [];
+
+    function refrescarComboPlantillas() {
+        var agrupadas = construirPlantillasAgrupadasDesdeSheet();
+        combosPlantillasRef.forEach(function(combo) { combo.poblar(agrupadas); });
+    }
 
     // ─────────────────────────────────────────────
     // Resaltado en vivo de HTML dentro de los campos de Diagnóstico
@@ -1782,7 +1985,11 @@
     // forma de conseguirlo — SIEMPRE llama a "callback" una vez, para que
     // quien lo use pueda restaurar su botón aunque falle.
     function obtenerTextoPlantilla(plantilla, callback) {
-        var cacheKey = 'hanna_plantilla_cache_' + plantilla.clave;
+        // Se usa el nombre del ARCHIVO (no "clave", que ahora es solo el
+        // índice de la fila en el Sheet y puede correrse si se reordenan
+        // filas) para que la caché de cada plantilla sea siempre la misma,
+        // sin importar en qué posición quede dentro de la hoja.
+        var cacheKey = 'hanna_plantilla_cache_' + (plantilla.archivo || plantilla.clave);
         fetch(plantilla.url, { cache: 'no-store' })
             .then(function(r) { return r.text(); })
             .then(function(texto) {
@@ -1853,11 +2060,13 @@
         barra.style.gap = '6px';
         barra.style.fontFamily = 'Arial, sans-serif';
 
-        // Antes era un <select> nativo: con pocas plantillas funcionaba
-        // bien, pero no deja filtrar mientras escribes. Ahora es el mismo
-        // combo-con-buscador que usan los paneles de checkboxes, así que
-        // agregar más plantillas en el futuro sigue siendo fácil de elegir.
-        var combo = crearComboBuscable(PLANTILLAS_DIAGNOSTICO, '#6f42c1', '📋 Elegir plantilla de diagnóstico…');
+        // Antes era un <select> nativo con una lista fija en el código.
+        // Ahora es el mismo combo-con-buscador que usan los paneles de
+        // checkboxes, agrupado por categoría y construido en vivo desde la
+        // pestaña "plantillas" del Sheet — agregar un tipo de equipo nuevo
+        // ya no requiere tocar este archivo (ver sección 0c más arriba).
+        var combo = crearComboBuscable(construirPlantillasAgrupadasDesdeSheet(), '#6f42c1', '📋 Elegir plantilla de diagnóstico…');
+        combosPlantillasRef.push(combo);
 
         var botonCargar = document.createElement('button');
         botonCargar.type = 'button';
@@ -1894,7 +2103,7 @@
         botonCargar.onclick = function() {
             var clave = combo.obtenerValor();
             if (!clave) { alert('Elige una plantilla primero.'); return; }
-            var plantilla = PLANTILLAS_DIAGNOSTICO.filter(function(p) { return p.clave === clave; })[0];
+            var plantilla = obtenerPlantillaPorClave(clave);
             if (!plantilla) return;
 
             // Ya no se pregunta "¿reemplazar?": cargar ahora AGREGA la
@@ -2054,6 +2263,9 @@
         lineas.push(sheetLecturasUltimaActualizacion
             ? '🔄 Mediciones sincronizadas: ' + sheetLecturasUltimaActualizacion.toLocaleString()
             : '⚠️ Sin datos de Mediciones todavía.');
+        lineas.push(sheetPlantillasUltimaActualizacion
+            ? '🔄 Plantillas sincronizadas: ' + sheetPlantillasUltimaActualizacion.toLocaleString()
+            : '⚠️ Sin datos de Plantillas todavía.');
         etiquetaSheetSync.innerText = lineas.join(' · ');
     }
 
@@ -2074,7 +2286,7 @@
     }
 
     miniPanel.appendChild(crearBtnMini('🔄 Recargar datos del Sheet', '#6c757d', function() {
-        var pendientes = 2;
+        var pendientes = 3;
         var todoOk = true;
         function terminado(ok) {
             todoOk = todoOk && ok;
@@ -2083,10 +2295,12 @@
             actualizarEtiquetaSheetSync();
             refrescarMenuSoluciones();
             refrescarMenuLecturas();
-            alert(todoOk ? 'Soluciones y Mediciones actualizadas desde el Sheet.' : 'No se pudo conectar a alguna de las pestañas del Sheet. Se mantienen los últimos datos conocidos.');
+            refrescarComboPlantillas();
+            alert(todoOk ? 'Soluciones, Mediciones y Plantillas actualizadas desde el Sheet.' : 'No se pudo conectar a alguna de las pestañas del Sheet. Se mantienen los últimos datos conocidos.');
         }
         cargarDatosSheet(terminado);
         cargarDatosLecturas(terminado);
+        cargarDatosPlantillasSheet(terminado);
     }));
     miniPanel.appendChild(crearBtnMini('✏️ Abrir Sheet de lotes', '#28a745', abrirEditorSheet));
 
@@ -2112,12 +2326,16 @@
         }
     }
 
-    // Carga inicial de Soluciones y Mediciones: primero lo que quedó en
-    // caché (instantáneo), luego intenta refrescar cada pestaña del Sheet en
-    // segundo plano. En ambos casos se refresca el panel correspondiente por
-    // si ya estaba inyectado.
+    // Carga inicial de Soluciones, Mediciones y Plantillas: primero lo que
+    // quedó en caché (instantáneo), luego intenta refrescar cada pestaña del
+    // Sheet en segundo plano. En los tres casos se refresca el panel/combo
+    // correspondiente por si ya estaba inyectado. Plantillas, a diferencia
+    // de las otras dos, ya arranca con datosPlantillasSheet lleno (las 5
+    // plantillas por defecto, ver sección 0c), así que incluso sin caché ni
+    // Sheet disponible el técnico ve algo para elegir.
     cargarCache();
     cargarCacheLecturas();
+    cargarCachePlantillas();
     actualizarEtiquetaSheetSync();
     cargarDatosSheet(function() {
         actualizarEtiquetaSheetSync();
@@ -2126,6 +2344,10 @@
     cargarDatosLecturas(function() {
         actualizarEtiquetaSheetSync();
         refrescarMenuLecturas();
+    });
+    cargarDatosPlantillasSheet(function() {
+        actualizarEtiquetaSheetSync();
+        refrescarComboPlantillas();
     });
 
     // Primer intento de inyección (por si todo ya está en el DOM al cargar).
