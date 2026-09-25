@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.13
+// @version      16.15
 // @description  Panel completo: Mediciones/Soluciones 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.13';
+    var APP_VERSION = '16.15';
 
     var columnasPorFilaLecturas = 3;
 
@@ -518,9 +518,16 @@
     // llamen "soluciones_codigo". No se sabe (todavía) si esta sección se
     // repite por Revisión igual que Mediciones, así que por ahora sigue
     // siendo un único panel para toda la página, como en v16.1 y antes.
-    function obtenerInputsSoluciones() {
-        var inputs = document.querySelectorAll('input[name^="' + PREFIJO_SOLUCIONES + '"], table input[name*="soluciones"]');
-        if (inputs.length === 0) inputs = document.querySelectorAll('input[type="text"]');
+    // "alcance" es la tabla de Soluciones Estándar de UNA Revisión puntual
+    // (o el documento completo, en el caso raro de una página vieja sin
+    // Revisiones). Antes esto siempre buscaba en TODO el documento, lo cual
+    // solo servía mientras hubiera una única tabla de Soluciones en toda la
+    // página — con varias Revisiones cada una con su propia tabla, había que
+    // acotar la búsqueda a la tabla correcta (ver inyectarPanelesSoluciones).
+    function obtenerInputsSoluciones(alcance) {
+        var raiz = alcance || document;
+        var inputs = raiz.querySelectorAll('table input[name*="soluciones"], input[name^="' + PREFIJO_SOLUCIONES + '"]');
+        if (inputs.length === 0) inputs = raiz.querySelectorAll('input[type="text"]');
         return inputs;
     }
 
@@ -529,8 +536,8 @@
         input.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    function agregarSolucionSecuencial(datosFila) {
-        var inputs = obtenerInputsSoluciones();
+    function agregarSolucionSecuencial(datosFila, alcance) {
+        var inputs = obtenerInputsSoluciones(alcance);
         if (inputs.length === 0) return alert('No se encontraron campos de soluciones.');
 
         var totalFilas = Math.floor(inputs.length / COLUMNAS_POR_SOLUCION);
@@ -547,8 +554,8 @@
         alert('Ya no hay espacio libre en la tabla de Soluciones Estándar. Borra alguna fila antes de agregar otra.');
     }
 
-    function borrarSolucionesSecuencial() {
-        var inputs = obtenerInputsSoluciones();
+    function borrarSolucionesSecuencial(alcance) {
+        var inputs = obtenerInputsSoluciones(alcance);
         for (var i = 0; i < inputs.length; i++) {
             inputs[i].value = '';
             dispararEventos(inputs[i]);
@@ -557,8 +564,8 @@
 
     // Borra solo los 4 campos de UNA fila (código, lote, vencimiento,
     // descripción), identificada por el índice de su primer campo.
-    function borrarFilaSolucion(base) {
-        var inputs = obtenerInputsSoluciones();
+    function borrarFilaSolucion(base, alcance) {
+        var inputs = obtenerInputsSoluciones(alcance);
         for (var c = 0; c < COLUMNAS_POR_SOLUCION; c++) {
             if (inputs[base + c]) {
                 inputs[base + c].value = '';
@@ -571,8 +578,8 @@
     // al menos un campo lleno, un pequeño botón "✖" para borrar solo esa
     // fila. El botón aparece/desaparece solo según si la fila tiene datos
     // (ya sea porque el técnico la llenó a mano o por el menú de arriba).
-    function inyectarBotonesLimpiarFila() {
-        var inputs = obtenerInputsSoluciones();
+    function inyectarBotonesLimpiarFila(alcance) {
+        var inputs = obtenerInputsSoluciones(alcance);
         var totalFilas = Math.floor(inputs.length / COLUMNAS_POR_SOLUCION);
 
         for (var fila = 0; fila < totalFilas; fila++) {
@@ -611,7 +618,7 @@
                 }
 
                 boton.onclick = function() {
-                    borrarFilaSolucion(baseFila);
+                    borrarFilaSolucion(baseFila, alcance);
                     actualizarVisibilidad();
                 };
 
@@ -760,6 +767,13 @@
         return mapa;
     }
 
+    // Para el buscador del panel de checklist: compara sin importar
+    // mayúsculas/minúsculas ni tildes ("vencimiento" debe encontrar
+    // "Vencimiento" y "verificación").
+    function normalizarTextoBusqueda(s) {
+        return (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    }
+
     // Panel de checkboxes para elegir varios ítems de una lista de una vez
     // (en vez de un <select> que se aplica al primer clic). El técnico marca
     // los que usó, agrupados por categoría/parámetro, y los carga todos
@@ -767,8 +781,24 @@
     // tabla, así que si ya había algo cargado, lo nuevo se agrega debajo sin
     // borrarlo. Se reutiliza tanto para Soluciones Estándar como para
     // Mediciones Iniciales/Finales.
+    //
+    // Cada categoría inicia PLEGADA (solo el título, sin sus casillas) y se
+    // despliega con un clic; además hay un buscador arriba de la lista que,
+    // al escribir, filtra los ítems de todas las categorías y despliega
+    // automáticamente solo las que tienen resultados — al borrar el texto,
+    // cada categoría vuelve a quedar como el técnico la había dejado.
+    //
+    // El panel de checkboxes "flota" (position:absolute) en vez de ocupar
+    // espacio en el flujo normal de la página: como "barra" es un elemento
+    // propio del script (no una celda/columna de la intranet cuyo tamaño
+    // dependa de layout ajeno), darle position:relative y sacar el panel del
+    // flujo con position:absolute es seguro — no repite el problema de v16.11
+    // (ese sí era sobre campos REALES del formulario, con su propio CSS).
+    // Así, abrir/cerrar el panel ya no empuja hacia abajo la tabla ni el
+    // resto de la página.
     function crearPanelChecklist(opcionesIniciales, colorBorde, textoBotonAbrir, onCargarSeleccionadas) {
         var barra = document.createElement('div');
+        barra.style.position = 'relative';
         barra.style.display = 'flex';
         barra.style.flexDirection = 'column';
         barra.style.margin = '6px 0';
@@ -802,15 +832,33 @@
         panel.style.borderRadius = '8px';
         panel.style.padding = '10px';
         panel.style.marginTop = '6px';
-        panel.style.maxWidth = '420px';
-        panel.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+        panel.style.width = '340px';
+        panel.style.maxWidth = '90vw';
+        panel.style.boxShadow = '0 8px 24px rgba(0,0,0,0.18)';
         panel.style.fontSize = '12px';
+        // Flota sobre la página: no queda en el flujo normal, así que
+        // abrirlo/cerrarlo no mueve nada de su alrededor.
+        panel.style.position = 'absolute';
+        panel.style.top = '100%';
+        panel.style.left = '0';
+        panel.style.zIndex = '1000';
+
+        var buscador = document.createElement('input');
+        buscador.type = 'text';
+        buscador.placeholder = '🔍 Buscar...';
+        buscador.style.padding = '5px 7px';
+        buscador.style.fontSize = '12px';
+        buscador.style.border = '1px solid #ced4da';
+        buscador.style.borderRadius = '4px';
+        buscador.style.width = '100%';
+        buscador.style.boxSizing = 'border-box';
+        panel.appendChild(buscador);
 
         var lista = document.createElement('div');
         lista.style.display = 'flex';
         lista.style.flexDirection = 'column';
-        lista.style.gap = '10px';
-        lista.style.maxHeight = '260px';
+        lista.style.gap = '2px';
+        lista.style.maxHeight = '280px';
         lista.style.overflowY = 'auto';
         panel.appendChild(lista);
 
@@ -848,8 +896,15 @@
         panel.appendChild(filaAcciones);
         barra.appendChild(panel);
 
+        // Un registro por categoría, para que el buscador pueda filtrar sus
+        // ítems y luego restaurar cómo la había dejado el técnico (abierta o
+        // plegada) al borrar el texto de búsqueda.
+        var grupos = [];
+
         function poblar(opciones) {
             lista.innerHTML = '';
+            grupos = [];
+            buscador.value = '';
             if (!opciones || opciones.length === 0) {
                 var vacio = document.createElement('div');
                 vacio.style.color = '#6c757d';
@@ -858,13 +913,47 @@
                 return;
             }
             opciones.forEach(function(grupo) {
+                var grupoDiv = document.createElement('div');
+
                 var titulo = document.createElement('div');
-                titulo.innerText = grupo.categoria;
+                titulo.style.display = 'flex';
+                titulo.style.alignItems = 'center';
+                titulo.style.gap = '5px';
                 titulo.style.fontWeight = 'bold';
                 titulo.style.color = '#495057';
+                titulo.style.cursor = 'pointer';
+                titulo.style.padding = '4px 2px';
                 titulo.style.borderBottom = '1px solid #dee2e6';
-                titulo.style.paddingBottom = '2px';
-                lista.appendChild(titulo);
+                titulo.style.userSelect = 'none';
+
+                var flecha = document.createElement('span');
+                flecha.innerText = '▸';
+                flecha.style.fontSize = '10px';
+                flecha.style.width = '10px';
+                flecha.style.display = 'inline-block';
+
+                var textoTitulo = document.createElement('span');
+                textoTitulo.innerText = grupo.categoria + ' (' + grupo.items.length + ')';
+
+                titulo.appendChild(flecha);
+                titulo.appendChild(textoTitulo);
+                grupoDiv.appendChild(titulo);
+
+                var itemsDiv = document.createElement('div');
+                itemsDiv.style.display = 'none'; // plegado por defecto
+                itemsDiv.style.flexDirection = 'column';
+                itemsDiv.style.gap = '6px';
+                itemsDiv.style.padding = '6px 0 8px 15px';
+                grupoDiv.appendChild(itemsDiv);
+
+                var abiertoManual = false;
+                titulo.onclick = function() {
+                    abiertoManual = !abiertoManual;
+                    itemsDiv.style.display = abiertoManual ? 'flex' : 'none';
+                    flecha.innerText = abiertoManual ? '▾' : '▸';
+                };
+
+                var itemsBusqueda = [];
 
                 grupo.items.forEach(function(item) {
                     var label = document.createElement('label');
@@ -883,20 +972,87 @@
 
                     label.appendChild(checkbox);
                     label.appendChild(texto);
-                    lista.appendChild(label);
+                    itemsDiv.appendChild(label);
+
+                    itemsBusqueda.push({ label: label, textoNormalizado: normalizarTextoBusqueda(item.etiqueta) });
+                });
+
+                lista.appendChild(grupoDiv);
+                grupos.push({
+                    grupoDiv: grupoDiv, itemsDiv: itemsDiv, flecha: flecha, items: itemsBusqueda,
+                    categoriaNormalizada: normalizarTextoBusqueda(grupo.categoria),
+                    estaAbierto: function() { return abiertoManual; }
                 });
             });
         }
 
+        // Al escribir, se despliegan solo las categorías con resultados y se
+        // ocultan (sin borrarlos del DOM) los ítems que no coinciden — así
+        // ninguna casilla ya marcada se pierde por filtrar. Al borrar el
+        // texto, cada categoría vuelve a su estado manual (abierta/plegada).
+        buscador.addEventListener('input', function() {
+            var termino = normalizarTextoBusqueda(buscador.value.trim());
+            grupos.forEach(function(g) {
+                if (termino === '') {
+                    g.grupoDiv.style.display = '';
+                    g.items.forEach(function(it) { it.label.style.display = ''; });
+                    var abierto = g.estaAbierto();
+                    g.itemsDiv.style.display = abierto ? 'flex' : 'none';
+                    g.flecha.innerText = abierto ? '▾' : '▸';
+                    return;
+                }
+                // Si el término coincide con el nombre de la categoría (ej.
+                // "conductividad"), se muestran todos sus ítems aunque el
+                // texto de cada uno no lo mencione explícitamente.
+                var categoriaCoincide = g.categoriaNormalizada.indexOf(termino) !== -1;
+                var algunaCoincide = false;
+                g.items.forEach(function(it) {
+                    var coincide = categoriaCoincide || it.textoNormalizado.indexOf(termino) !== -1;
+                    it.label.style.display = coincide ? '' : 'none';
+                    if (coincide) algunaCoincide = true;
+                });
+                g.grupoDiv.style.display = algunaCoincide ? '' : 'none';
+                g.itemsDiv.style.display = algunaCoincide ? 'flex' : 'none';
+                g.flecha.innerText = algunaCoincide ? '▾' : '▸';
+            });
+        });
+
         poblar(opcionesIniciales);
 
+        // Cierra el panel si se hace clic fuera de él, o con Escape — como
+        // cualquier menú flotante. Los listeners solo quedan activos
+        // mientras el panel está abierto, para no acumular uno por cada
+        // panel de la página (puede haber varios: Mediciones Iniciales,
+        // Finales y Soluciones, por cada Revisión).
+        function alClicFuera(ev) {
+            if (!barra.contains(ev.target)) cerrarPanel();
+        }
+        function alEscape(ev) {
+            if (ev.key === 'Escape') cerrarPanel();
+        }
+        function cerrarPanel() {
+            panel.style.display = 'none';
+            document.removeEventListener('mousedown', alClicFuera, true);
+            document.removeEventListener('keydown', alEscape, true);
+        }
+
         botonAbrir.onclick = function() {
-            panel.style.display = (panel.style.display === 'none') ? 'flex' : 'none';
+            var vaAAbrir = panel.style.display === 'none';
+            panel.style.display = vaAAbrir ? 'flex' : 'none';
+            if (vaAAbrir) {
+                document.addEventListener('mousedown', alClicFuera, true);
+                document.addEventListener('keydown', alEscape, true);
+            } else {
+                document.removeEventListener('mousedown', alClicFuera, true);
+                document.removeEventListener('keydown', alEscape, true);
+            }
         };
 
         function cerrarYLimpiarSeleccion() {
-            panel.style.display = 'none';
+            cerrarPanel();
             [].slice.call(lista.querySelectorAll('input[type="checkbox"]')).forEach(function(cb) { cb.checked = false; });
+            buscador.value = '';
+            buscador.dispatchEvent(new Event('input'));
         }
 
         botonCancelar.onclick = cerrarYLimpiarSeleccion;
@@ -912,6 +1068,148 @@
         };
 
         return { barra: barra, poblar: poblar };
+    }
+
+    // Combo con buscador para elegir UNA sola opción de una lista (a
+    // diferencia de crearPanelChecklist, que es de selección múltiple con
+    // checkboxes). Reemplaza a un <select> nativo, que no deja filtrar
+    // mientras escribes: en vez de eso, un botón muestra la opción elegida
+    // (o el texto de placeholder) y, al hacer clic, abre un panel flotante
+    // con un buscador arriba y la lista debajo — clic en una opción la
+    // elige y cierra el panel. Reutiliza el mismo criterio de "panel
+    // flotante" que crearPanelChecklist (position:absolute, cierra con
+    // clic afuera o Escape) para no empujar la página al abrirse.
+    function crearComboBuscable(opciones, colorBorde, textoPlaceholder) {
+        var contenedor = document.createElement('div');
+        contenedor.style.position = 'relative';
+        contenedor.style.display = 'inline-block';
+
+        var botonSelector = document.createElement('button');
+        botonSelector.type = 'button';
+        botonSelector.style.fontSize = '12px';
+        botonSelector.style.padding = '5px 8px';
+        botonSelector.style.borderRadius = '4px';
+        botonSelector.style.border = '1px solid ' + colorBorde;
+        botonSelector.style.color = '#495057';
+        botonSelector.style.backgroundColor = '#fff';
+        botonSelector.style.cursor = 'pointer';
+        botonSelector.style.maxWidth = '320px';
+        botonSelector.style.display = 'inline-flex';
+        botonSelector.style.alignItems = 'center';
+        botonSelector.style.gap = '6px';
+
+        var textoBoton = document.createElement('span');
+        textoBoton.style.overflow = 'hidden';
+        textoBoton.style.textOverflow = 'ellipsis';
+        textoBoton.style.whiteSpace = 'nowrap';
+        textoBoton.innerText = textoPlaceholder;
+        botonSelector.appendChild(textoBoton);
+
+        var flechaBoton = document.createElement('span');
+        flechaBoton.innerText = '▾';
+        flechaBoton.style.fontSize = '10px';
+        flechaBoton.style.marginLeft = 'auto';
+        flechaBoton.style.flexShrink = '0';
+        botonSelector.appendChild(flechaBoton);
+
+        contenedor.appendChild(botonSelector);
+
+        var panel = document.createElement('div');
+        panel.style.display = 'none';
+        panel.style.flexDirection = 'column';
+        panel.style.gap = '6px';
+        panel.style.backgroundColor = '#f8f9fa';
+        panel.style.border = '1px solid #dee2e6';
+        panel.style.borderRadius = '8px';
+        panel.style.padding = '8px';
+        panel.style.marginTop = '4px';
+        panel.style.width = '300px';
+        panel.style.maxWidth = '90vw';
+        panel.style.boxShadow = '0 8px 24px rgba(0,0,0,0.18)';
+        panel.style.fontSize = '12px';
+        panel.style.position = 'absolute';
+        panel.style.top = '100%';
+        panel.style.left = '0';
+        panel.style.zIndex = '1000';
+
+        var buscador = document.createElement('input');
+        buscador.type = 'text';
+        buscador.placeholder = '🔍 Buscar...';
+        buscador.style.padding = '5px 7px';
+        buscador.style.fontSize = '12px';
+        buscador.style.border = '1px solid #ced4da';
+        buscador.style.borderRadius = '4px';
+        buscador.style.width = '100%';
+        buscador.style.boxSizing = 'border-box';
+        panel.appendChild(buscador);
+
+        var lista = document.createElement('div');
+        lista.style.display = 'flex';
+        lista.style.flexDirection = 'column';
+        lista.style.maxHeight = '240px';
+        lista.style.overflowY = 'auto';
+        panel.appendChild(lista);
+
+        contenedor.appendChild(panel);
+
+        var claveSeleccionada = '';
+        var itemsBusqueda = [];
+
+        opciones.forEach(function(opcion) {
+            var item = document.createElement('div');
+            item.innerText = opcion.etiqueta;
+            item.style.padding = '6px 8px';
+            item.style.borderRadius = '4px';
+            item.style.cursor = 'pointer';
+            item.onmouseenter = function() { item.style.backgroundColor = '#e9ecef'; };
+            item.onmouseleave = function() { item.style.backgroundColor = ''; };
+            item.onclick = function() {
+                claveSeleccionada = opcion.clave;
+                textoBoton.innerText = opcion.etiqueta;
+                cerrarPanel();
+            };
+            lista.appendChild(item);
+            itemsBusqueda.push({ elemento: item, textoNormalizado: normalizarTextoBusqueda(opcion.etiqueta) });
+        });
+
+        buscador.addEventListener('input', function() {
+            var termino = normalizarTextoBusqueda(buscador.value.trim());
+            itemsBusqueda.forEach(function(it) {
+                it.elemento.style.display = (termino === '' || it.textoNormalizado.indexOf(termino) !== -1) ? '' : 'none';
+            });
+        });
+
+        function alClicFuera(ev) {
+            if (!contenedor.contains(ev.target)) cerrarPanel();
+        }
+        function alEscape(ev) {
+            if (ev.key === 'Escape') cerrarPanel();
+        }
+        function cerrarPanel() {
+            panel.style.display = 'none';
+            buscador.value = '';
+            buscador.dispatchEvent(new Event('input'));
+            document.removeEventListener('mousedown', alClicFuera, true);
+            document.removeEventListener('keydown', alEscape, true);
+        }
+
+        botonSelector.onclick = function() {
+            var vaAAbrir = panel.style.display === 'none';
+            panel.style.display = vaAAbrir ? 'flex' : 'none';
+            if (vaAAbrir) {
+                buscador.focus();
+                document.addEventListener('mousedown', alClicFuera, true);
+                document.addEventListener('keydown', alEscape, true);
+            } else {
+                document.removeEventListener('mousedown', alClicFuera, true);
+                document.removeEventListener('keydown', alEscape, true);
+            }
+        };
+
+        return {
+            contenedor: contenedor,
+            obtenerValor: function() { return claveSeleccionada; }
+        };
     }
 
     // Inyecta el panel de Mediciones Iniciales/Finales para CADA Revisión
@@ -953,36 +1251,55 @@
         });
     }
 
-    // A diferencia de Mediciones, Soluciones Estándar todavía se maneja
-    // como UN SOLO panel para toda la página (ver la nota en
-    // obtenerInputsSoluciones): sus 4 columnas no comparten un prefijo con
-    // número de Revisión como sí pasa en Mediciones, así que por ahora no
-    // se sabe repartir por Revisión sin arriesgarse a mezclar datos. Si en
-    // el futuro se confirma que esta sección SÍ se repite por Revisión (con
-    // un patrón de "name" identificable), se puede generalizar igual que
+    // Confirmado con un campo real del Informe 2: "soluciones_codigo[2][1]"
+    // — igual que Mediciones, Soluciones Estándar SÍ trae el número de
+    // Revisión entre corchetes justo después del nombre del campo. Antes el
+    // código asumía (a falta de esa confirmación) que era una sola tabla
+    // para toda la página, así que solo alcanzaba a poner el botón "Elegir…"
+    // en la primera tabla que encontraba — el resto de Revisiones se
+    // quedaban sin botón. Ahora se reparte por Revisión, igual que ya hace
     // inyectarPanelesLecturas.
+    //
+    // Las otras 3 columnas (Lote, Vencimiento, Descripción) no comparten el
+    // prefijo "soluciones_codigo", pero si tienen "soluciones" en el nombre
+    // en algún lado (confirmado porque ya funcionaban en la tabla de la
+    // Revisión 1); por eso, en vez de adivinar sus nombres exactos, cada
+    // Revisión se identifica por la TABLA que contiene a su campo "Código"
+    // (closest('table')), y esa tabla es la que se le pasa como "alcance" a
+    // obtenerInputsSoluciones/agregarSolucionSecuencial/etc. — así cada
+    // panel solo toca los campos de SU PROPIA tabla, nunca los de otra
+    // Revisión.
     function inyectarPanelesSoluciones() {
-        if (controlesInyectados.soluciones['1']) return;
-        var refCampo = document.querySelector('input[name^="' + PREFIJO_SOLUCIONES + '"]');
-        if (!refCampo) return;
+        var prefijosPorRevision = extraerPrefijosPorRevision(PREFIJO_SOLUCIONES);
+        var revisiones = Object.keys(prefijosPorRevision);
+        var multiplesRevisiones = revisiones.length > 1;
 
-        var panel = crearPanelChecklist(construirOpcionesSolucionesDesdeSheet(), '#28a745', '🧴 Elegir Soluciones Estándar…', function(clavesSeleccionadas) {
-            clavesSeleccionadas.forEach(function(clave) {
-                var fila = datosSheet[Number(clave)];
-                if (!fila) return;
-                agregarSolucionSecuencial([fila.codigo, fila.lote, fila.venc, fila.desc]);
+        revisiones.forEach(function(rev) {
+            if (controlesInyectados.soluciones[rev]) return;
+            var prefijoRevision = prefijosPorRevision[rev];
+            var refCampo = document.querySelector('input[name^="' + prefijoRevision + '"]');
+            if (!refCampo) return;
+            var tabla = refCampo.closest('table') || refCampo.closest('tbody') || document;
+
+            var etiqueta = multiplesRevisiones ? ('🧴 Elegir Soluciones Estándar… (Revisión ' + rev + ')') : '🧴 Elegir Soluciones Estándar…';
+            var panel = crearPanelChecklist(construirOpcionesSolucionesDesdeSheet(), '#28a745', etiqueta, function(clavesSeleccionadas) {
+                clavesSeleccionadas.forEach(function(clave) {
+                    var fila = datosSheet[Number(clave)];
+                    if (!fila) return;
+                    agregarSolucionSecuencial([fila.codigo, fila.lote, fila.venc, fila.desc], tabla);
+                });
             });
+            panelesSolucionesRef.push(panel);
+
+            var filaBotonesSol = panel.barra.firstChild; // la fila con el botón "Elegir…"
+            filaBotonesSol.appendChild(crearBotonIcono('🗑️', 'Borrar esta tabla de Soluciones Estándar', '#28a745', function() { borrarSolucionesSecuencial(tabla); }));
+            filaBotonesSol.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de lotes/vencimientos', '#28a745', abrirEditorSheet));
+
+            if (anclarAntesDeTabla(refCampo, panel.barra)) {
+                controlesInyectados.soluciones[rev] = true;
+                inyectarBotonesLimpiarFila(tabla);
+            }
         });
-        panelesSolucionesRef.push(panel);
-
-        var filaBotonesSol = panel.barra.firstChild; // la fila con el botón "Elegir…"
-        filaBotonesSol.appendChild(crearBotonIcono('🗑️', 'Borrar la tabla de Soluciones Estándar', '#28a745', borrarSolucionesSecuencial));
-        filaBotonesSol.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de lotes/vencimientos', '#28a745', abrirEditorSheet));
-
-        if (anclarAntesDeTabla(refCampo, panel.barra)) {
-            controlesInyectados.soluciones['1'] = true;
-            inyectarBotonesLimpiarFila();
-        }
     }
 
     function intentarInyectarControles() {
@@ -1536,28 +1853,11 @@
         barra.style.gap = '6px';
         barra.style.fontFamily = 'Arial, sans-serif';
 
-        var select = document.createElement('select');
-        select.style.fontSize = '12px';
-        select.style.padding = '4px 6px';
-        select.style.borderRadius = '4px';
-        select.style.border = '1px solid #6f42c1';
-        select.style.color = '#495057';
-        select.style.backgroundColor = '#fff';
-        select.style.maxWidth = '320px';
-
-        var optPlaceholder = document.createElement('option');
-        optPlaceholder.textContent = '📋 Elegir plantilla de diagnóstico…';
-        optPlaceholder.value = '';
-        optPlaceholder.disabled = true;
-        optPlaceholder.selected = true;
-        select.appendChild(optPlaceholder);
-
-        PLANTILLAS_DIAGNOSTICO.forEach(function(plantilla) {
-            var op = document.createElement('option');
-            op.textContent = plantilla.etiqueta;
-            op.value = plantilla.clave;
-            select.appendChild(op);
-        });
+        // Antes era un <select> nativo: con pocas plantillas funcionaba
+        // bien, pero no deja filtrar mientras escribes. Ahora es el mismo
+        // combo-con-buscador que usan los paneles de checkboxes, así que
+        // agregar más plantillas en el futuro sigue siendo fácil de elegir.
+        var combo = crearComboBuscable(PLANTILLAS_DIAGNOSTICO, '#6f42c1', '📋 Elegir plantilla de diagnóstico…');
 
         var botonCargar = document.createElement('button');
         botonCargar.type = 'button';
@@ -1592,7 +1892,7 @@
         }
 
         botonCargar.onclick = function() {
-            var clave = select.value;
+            var clave = combo.obtenerValor();
             if (!clave) { alert('Elige una plantilla primero.'); return; }
             var plantilla = PLANTILLAS_DIAGNOSTICO.filter(function(p) { return p.clave === clave; })[0];
             if (!plantilla) return;
@@ -1612,17 +1912,17 @@
                     // el aviso se lea más limpio en texto corrido.
                     plantillasCargadasPorRevision[sufijo].push(plantilla.etiqueta.replace(/^\s*\S+\s*/, ''));
                     actualizarAviso();
-                    // A propósito NO se limpia el <select> (select.value = '')
-                    // después de cargar. Se deja la opción elegida visible
-                    // para que el técnico vea a simple vista cuál fue la
-                    // última plantilla que cargó.
+                    // A propósito NO se limpia el combo después de cargar.
+                    // Se deja la opción elegida visible en el botón para que
+                    // el técnico vea a simple vista cuál fue la última
+                    // plantilla que cargó.
                 }
                 botonCargar.disabled = false;
                 botonCargar.innerText = textoOriginalBoton;
             });
         };
 
-        barra.appendChild(select);
+        barra.appendChild(combo.contenedor);
         barra.appendChild(botonCargar);
         contenedorCompleto.appendChild(barra);
         contenedorCompleto.appendChild(aviso);
