@@ -1,0 +1,82 @@
+###ESTADO_FISICO_EXTERNO###
+
+<b>Antecedentes:</b>
+<b>Motivo de ingreso:mantenimiento y calibración anual</b>
+Carcasa: <mark style="background-color: orange;">[Aceptable] con acumulación de contaminación manchas y deterioro</mark> 
+Bloque: <mark style="background-color: orange;">[Aceptable] con acumulación de contaminación manchas y deterioro</mark> 
+Encendido y visualización: <mark style="background-color: lightgreen;">[OK]</mark> 
+Teclado: (Conmutación) <mark style="background-color: lightgreen;">[OK]</mark> 
+         (mascara) <mark style="background-color: lightgreen;">[OK] </mark> 
+Protector de pantalla: <mark style="background-color: lightgreen;">[OK]</mark> 
+Conector: <mark style="background-color: lightgreen;">[OK]</mark>    
+Accesorios: <mark>No registra</mark>
+
+<mark style="background-color: lightgreen;">[OK]</mark> 
+<mark style="background-color: orange;">[Atención]</mark> 
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###ESTADO_FISICO_INTERNO###
+
+Carcasa: <mark style="background-color: orange;">con contaminación, manchas  y deterioro </mark> 
+Fusible:<mark style="background-color: lightgreen;">[OK]</mark> 
+Tarjetas electrónicas: (Circuitos)  <mark style="background-color: orange;">con contaminación   y deterioro </mark> 
+                    (componentes)  <mark style="background-color: orange;">con contaminación   y deterioro </mark> 
+                       (Pantalla) <mark style="background-color: lightgreen;">[OK]</mark> 
+                  (Transformador) <mark style="background-color: lightgreen;">[OK]</mark>   
+Bloque: (Resistencia) <mark style="background-color: orange;">[OK]con contaminación   y deterioro </mark>
+              (Sensor) <mark style="background-color: lightgreen;">[OK]</mark> 
+     (Termofusible) <mark style="background-color: lightgreen;">[OK]</mark> 
+ 
+
+<mark style="background-color: lightgreen;">[OK]</mark> 
+<mark style="background-color: orange;">[Atención]</mark> 
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###DE ACUERDO CON LOS RESULTADOS OBTENIDOS ¿SE REQUIEREN ACCIONES CORRECTIVAS O PREVENTIVAS?###
+
+Se sometieron los sensores a protocolos de limpieza y se devolvió el termofusible a la posición de cerrado, el equipo encendió.
+
+###MÉTODO_DE_VERIIFCACIÓN###
+
+Se contrastan las temperaturas del bloque con termómetro de referencia y se evalúan los tiempos para alcanzar las temperaturas programadas.
+
+
+###OBSERVACIONES###
+
+El termoreactor es operativo acorde a especificaciones técnicas, se deja a consideración del cliente la cotización anexa por concepto de mantenimiento preventivo el cual incluye:
+
+- Limpieza general  de las placas electrónicas  y conectores.
+- Limpieza específica de componentes electrónicos.
+- Limpieza del bloque
+- Limpieza especifica de los buses de conexión.
+- Limpieza externa.
+- Etiqueta e informe de mantenimiento. 
+
+La garantía del servicio es de 2 meses y no aplica por daños relacionados a mala manipulación o el desgaste normal de componentes electrónicos o consumibles.
+
+
+
+<b>Directrices y precauciones de seguridad</b>
+• No coloque el reactor cerca de una fuente de calor. Evite la presencia de líquidos inflamables cerca del reactor en funcionamiento.
+• No cubra las ranuras de ventilación laterales.
+• Desconecte la alimentación eléctrica si se produce un derrame accidental.
+• La manipulación de muestras químicas, patrones y reactivos puede ser peligrosa. Revise las fichas de datos de seguridad
+y familiarícese con todos los procedimientos de seguridad antes de manipular cualquier producto químico.
+• El bloque del reactor se calienta unos grados por encima de la temperatura seleccionada (configurada), ya que tiene en cuenta
+la transferencia de calor localizada a los viales.
+• La temperatura del bloque del reactor desciende al insertar los viales en el reactor. Deje que la temperatura del bloque alcance
+la temperatura de digestión requerida.
+
+
+<b>MEDIDAS DE SEGURIDAD
+SUPERFICIE CALIENTE NO TOCAR</b> Tocar las superficies del bloque del reactor y los viales mientras están calientes puede provocar quemaduras graves.
+Preste atención a todas las advertencias y precauciones. El incumplimiento de estas instrucciones podría provocar lesiones al operador o
+daños al equipo. No utilice el reactor de ninguna otra forma que no sea la especificada en este manual.
+<b>Equipo de seguridad</b>
+ • Tenga cuidado y utilice protección ocular y ropa adecuadas cuando maneje el reactor.
+• Se recomienda encarecidamente el uso del escudo de seguridad suministrado.
+<b>Derrames de reactivos</b> • Si se produce un derrame de reactivo, límpielo inmediatamente.
+• Si el reactivo entra en contacto con la piel, enjuague bien la zona afectada con agua.
+• Evite respirar los vapores liberados.
+<b>Eliminación de residuos</b> • Póngase en contacto con un proveedor autorizado de eliminación de residuos para la eliminación adecuada de los viales de reactivos y las muestras que hayan reaccionado.
+<b>Peligro de incendio</b> • Mantenga los líquidos inflamables alejados del reactor en funcionamiento.
