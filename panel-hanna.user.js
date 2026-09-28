@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.17
+// @version      16.18
 // @description  Panel completo: Mediciones/Soluciones/Plantillas de Diagnóstico 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.17';
+    var APP_VERSION = '16.18';
 
     var columnasPorFilaLecturas = 3;
 
