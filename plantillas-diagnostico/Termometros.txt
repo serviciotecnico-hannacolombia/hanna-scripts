@@ -1,0 +1,74 @@
+###ESTADO_FISICO_EXTERNO###
+<b>Antecedentes:</b>
+<b>Motivo de ingreso:</b>
+
+<b>Medidor (HI 9XXXX):</b>
+Carcasa:<mark style="background-color: lightgreen;">[OK]</mark>
+Tapa compartimiento de baterías:<mark style="background-color: orange;">[Atención]</mark>
+Teclado: (Conmutación)<mark style="background-color: lightgreen;">[OK]</mark>
+         (mascara)<mark style="background-color: lightgreen;">[OK]</mark>
+Protector de pantalla:<mark style="background-color: lightgreen;">[OK]</mark>
+Encendido y visualización:<mark style="background-color: lightgreen;">[OK]</mark>
+Nivel de batería:<mark style="background-color: lightgreen;">[OK]</mark>
+Conector:<mark style="background-color: lightgreen;">[OK]</mark>
+
+Accesorios:
+
+ <b>Sensor:</b>
+Conector:<mark style="background-color: orange;">[Atención]</mark>
+Elemento sensitivo:(T°)<mark style="background-color: orange;">[Atención]</mark>
+
+
+<mark style="background-color: lightgreen;">[OK]</mark>
+<mark style="background-color: orange;">[Atención]</mark>
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###ESTADO_FISICO_INTERNO###
+
+<b>Medidor (HI 9XXXX):</b>
+
+Compartimiento de baterías:<mark style="background-color: orange;">[Atención]</mark>
+Muelles de Contacto de las baterías:<mark style="background-color: orange;">[Atención]</mark>
+Carcasa:<mark style="background-color: lightgreen;">[OK]</mark>
+Tarjeta electrónica: (Circuitos)<mark style="background-color: lightgreen;">[OK]</mark>
+                     (componentes)<mark style="background-color: lightgreen;">[OK]</mark>
+                     (Pantalla)<mark style="background-color: lightgreen;">[OK]</mark>
+
+* Por el diseño compacto no es posible tener acceso a componentes internos.
+
+<mark style="background-color: lightgreen;">[OK]</mark>
+<mark style="background-color: orange;">[Atención]</mark>
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###DE ACUERDO CON LOS RESULTADOS OBTENIDOS ¿SE REQUIEREN ACCIONES CORRECTIVAS O PREVENTIVAS?###
+
+Se sometieron los sensores a protocolos de limpieza y acondicionamiento.
+
+###MÉTODO_DE_VERIIFCACIÓN###
+
+Se contrastan las lecturas con equipo de referencia.
+
+
+###OBSERVACIONES###
+
+<b>Medidor (HI 9XXXXX):</b> El equipo es diagnosticado no operativo, su condición no es reparable.
+
+<b>Sensor:</b>
+
+Teniendo en cuenta lo antes mencionado se debe hacer el cambio del termómetro HI 98501.
+
+En este caso es posible llevar a cabo mantenimiento preventivo con el fin de eliminar la contaminación.
+
+El mantenimiento preventivo incluye:
+- Limpieza general  de las placas electrónicas y conectores.
+- Limpieza específica de componentes electrónicos.
+- Limpieza externa.
+- Etiqueta e informe de mantenimiento.
+ 
+La garantía del servicio es de 2 meses y no aplica por daños relacionados a mala manipulación o el desgaste normal de componentes electrónicos o consumibles.
+
+<b>Nota:</b> * Evite golpes o caídas, ya que puede generar daños   en la unidad de adquisición de datos del instrumento, sonda y sensores.
+
+* Recuerde la longitud recomendada de inmersión es de 4 cm a partir de la punta y máximo hasta la base donde termina la longitud del
+punzón.
+
