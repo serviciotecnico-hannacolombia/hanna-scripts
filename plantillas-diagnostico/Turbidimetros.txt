@@ -1,0 +1,71 @@
+###ESTADO_FISICO_EXTERNO###
+
+<b>Antecedentes: No Registra</b>
+<b>Motivo de ingreso: Mantenimiento preventivo, calibración </b>
+
+<b>Medidor (HI 9XXXX):</b>
+Carcasa:  <mark style="background-color: lightgreen;">[OK] presenta leve contaminación y deterioro</mark>
+Celda de medición: <mark style="background-color: lightgreen;">[OK]presenta leve contaminación y deterioro</mark> 
+Teclado: (Conmutación)  <mark style="background-color: lightgreen;">[OK]</mark> 
+         (mascara)  <mark style="background-color: lightgreen;">[OK]</mark> 
+Protector de pantalla: <mark style="background-color: lightgreen;">[OK]</mark> 
+Encendido y visualización: <mark style="background-color: lightgreen;">[OK] * Último calcheck año 2022</mark> 
+Conector: <mark style="background-color: lightgreen;">[OK] contamainción leve</mark> 
+                   (USB) <mark style="background-color: lightgreen;">[OK] contamainción leve</mark>
+ 
+Accesorios: (Adaptador de voltaje) <b> No Registra</b>         
+
+###ESTADO_FISICO_INTERNO###
+
+Carcasa: <mark style="background-color: lightgreen;">[OK] contamainción leve</mark> 
+Unidad óptica: (Lampara) <mark style="background-color: lightgreen;">[OK] contaminación leve</mark>
+               (Receptores) <mark style="background-color: red; color: white;">[Crítico] con opacidad de algunos</mark>
+               (Filtros) <mark style="background-color: orange;">[OK] contaminación l</mark>
+Tarjeta electrónica: (Circuitos)  <mark style="background-color: lightgreen;">[OK] contamainción leve</mark> 
+                    (Componentes) <mark style="background-color: lightgreen;">[OK] contamainción leve</mark> 
+                       (Pantalla) <mark style="background-color: lightgreen;">[OK] contamainción leve</mark> 
+                       (Teclado) <mark style="background-color: lightgreen;">[OK] contamainción leve</mark>
+
+<mark style="background-color: lightgreen;">[OK]</mark>
+<mark style="background-color: orange;">[Atención]</mark>
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###DE ACUERDO CON LOS RESULTADOS OBTENIDOS ¿SE REQUIEREN ACCIONES CORRECTIVAS O PREVENTIVAS?###
+
+Se sometieron los sensores a protocolos de limpieza y acondicionamiento.
+
+###MÉTODO_DE_VERIIFCACIÓN###
+
+Empleando estándares calcheck Hanna Instruments.
+
+
+###OBSERVACIONES###
+
+<b>Medidor (HI XXXX):</b>Durante la verificación, no se detectaron errores funcionales y las lecturas se encuentran dentro de los parámetros de especificación.
+
+En este caso es posible llevar a cabo mantenimiento preventivo con el fin de eliminar la contaminación.
+
+El mantenimiento preventivo incluye:
+- Limpieza general  de las placas electrónicas y conectores.
+- Limpieza específica de componentes electrónicos.
+- Limpieza específica de unidad óptica.
+- Limpieza especifica de los buses de conexión.
+- Limpieza externa.
+- Etiqueta e informe de mantenimiento.
+ 
+La garantía del servicio es de 2 meses y no aplica por daños relacionados a mala manipulación o el desgaste normal de componentes electrónicos o consumibles.
+
+• No utilice o almacene el equipo en ambientes contaminados o húmedos.
+• No agite, deje caer o someta el equipo a golpes contundentes.
+• No exponga el equipo a campos magnéticos fuertes.
+
+-Asegurarse de que la muestra no contiene residuos.
+-Siempre que se coloque el vial en la celda de medición, debe estar seco por fuera y libre de huellas dactilares, aceite o suciedad.
+-Evitar el contacto directo con las zonas de paso de luz del vial (aproximadamente 2 cm/1'' desde el fondo); se recomienda el uso de
+guantes durante la manipulación.
+-Limpie el vial con el paño de limpieza de microfibra HI731318 o con un paño sin pelusas.
+-Agitar el vial puede generar burbujas, causando lecturas más altas. Para obtener mediciones precisas, elimine estas burbujas colocando
+el vial en posición horizontal y realizando movimientos envolventes repetitivos.
+-No deje que la muestra reaccionada permanezca demasiado tiempo después de añadir el reactivo, ya que la exactitud se verá afectada.
+-Deseche la muestra inmediatamente después de que se haya tomado la lectura o el vidrio podría mancharse permanentemente.
+
