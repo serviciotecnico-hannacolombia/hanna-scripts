@@ -1,0 +1,70 @@
+###ESTADO_FISICO_EXTERNO###
+<b>Antecedentes:</b>
+<b>Motivo de ingreso:</b>
+
+
+<b>Medidor (HI 7XX):</b>
+Carcasa:<mark style="background-color: orange;">[Atención]</mark>
+Celda de medición:<mark style="background-color: red; color: white;">[Crítico]</mark>
+Teclado: (Conmutación)<mark style="background-color: lightgreen;">[OK]</mark>
+         (mascara)<mark style="background-color: lightgreen;">[OK]</mark>
+Protector de pantalla:<mark style="background-color: lightgreen;">[OK]</mark>
+Encendido y visualización:<mark style="background-color: lightgreen;">[OK]</mark>
+Nivel de batería:<mark style="background-color: lightgreen;">[OK]</mark>
+Accesorios:
+
+<mark style="background-color: lightgreen;">[OK]</mark>
+<mark style="background-color: orange;">[Atención]</mark>
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###ESTADO_FISICO_INTERNO###
+
+Tarjeta electrónica de tapa de batería: (Circuitos)<mark style="background-color: red; color: white;">[Crítico]</mark>
+* Por el diseño compacto no es posible tener acceso a componentes internos.
+                    
+<mark style="background-color: lightgreen;">[OK]</mark>
+<mark style="background-color: orange;">[Atención]</mark>
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###DE ACUERDO CON LOS RESULTADOS OBTENIDOS ¿SE REQUIEREN ACCIONES CORRECTIVAS O PREVENTIVAS?###
+
+Limpieza de sulfatación de la tarjeta electrónica de tapa de batería.
+
+###MÉTODO_DE_VERIIFCACIÓN###
+
+Empleando estándares cal check Hanna Instruments.
+
+
+###OBSERVACIONES###
+
+Durante la verificación, no se detectaron errores funcionales y las lecturas se encuentran dentro de los parámetros de especificación. No obstante, el instrumento presenta acumulación abundante de contaminación que ingresa a la celda de medición. La contaminación
+compromete la vida útil de los sensores y emisores de la unidad óptica. Debido a que estos no son reemplazables ni reparables y ya están afectados por la contaminación y el paso del tiempo, pueden presentarse fallas intermitentes
+
+Se deja a consideración del cliente cotización por concepto de mantenimiento preventivo.
+
+La garantía del servicio es de 2 meses y no aplica por daños relacionados a mala manipulación o el desgaste normal de componentes electrónicos o consumibles.
+
+*Tenga en cuenta*:
+La sulfatación y corrosión en los conectores de un equipo puede causar varios problemas, entre ellos:
+<b>Mala Conductividad:</b> La sulfatación crea una capa corrosiva en los contactos metálicos, lo que aumenta la resistencia eléctrica y dificulta
+la transmisión de corriente.
+<b>Fallas Intermitentes:</b> La conexión eléctrica puede volverse inestable, lo que genera apagones intermitentes o fallos en el funcionamiento del equipo.
+<b>Deterioro Prematuro del Equipo y sensores:</b> Una mala conexión debido a la oxidación puede hacer que el equipo reciba un voltaje inadecuado, dañando sus componentes internos.
+
+• Antes de almacenar el equipo por largos periodos de tiempo retire la batería.
+• No utilice o almacene el equipo en ambientes contaminados o húmedos.
+• No agite, deje caer o someta el equipo a golpes contundentes.
+• No exponga el equipo a campos magnéticos fuertes.
+-Asegurarse de que la muestra no contiene residuos.
+-Siempre que se coloque el vial en la celda de medición, debe estar seco por fuera y libre de huellas dactilares, aceite o suciedad.
+-Evitar el contacto directo con las zonas de paso de luz del vial (aproximadamente 2 cm/1'' desde el fondo); se recomienda el uso de
+guantes durante la manipulación.
+-Limpie el vial con el paño de limpieza de microfibra HI731318 o con un paño sin pelusas.
+-Agitar el vial puede generar burbujas, causando lecturas más altas. Para obtener mediciones precisas, elimine estas burbujas colocando
+el vial en posición horizontal y realizando movimientos envolventes repetitivos.
+-No deje que la muestra reaccionada permanezca demasiado tiempo después de añadir el reactivo, ya que la exactitud se verá afectada.
+-Deseche la muestra inmediatamente después de que se haya tomado la lectura o el vidrio podría mancharse permanentemente.
+<mark>-Evitar el contacto de líquidos con la placa base del instrumento, ya que carece de protección IP y es susceptible a daños electrónicos por ingreso de líquidos a la placa electrónica ubicada en esta área.</mark>
+
+
+
