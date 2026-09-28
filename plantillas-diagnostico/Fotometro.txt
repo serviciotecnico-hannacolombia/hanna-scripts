@@ -1,0 +1,92 @@
+###ESTADO_FISICO_EXTERNO###
+
+<b>Antecedentes: No Registra</b>
+<b>Motivo de ingreso: Mantenimiento preventivo, calibración </b>
+
+<b>Medidor (HI 83399-01):</b>
+Carcasa:  <mark style="background-color: lightgreen;">[OK] presenta leve contaminación y deterioro</mark>
+Celda de medición: <mark style="background-color: lightgreen;">[OK]presenta leve contaminación y deterioro</mark> 
+Teclado: (Conmutación)  <mark style="background-color: lightgreen;">[OK]</mark> 
+         (mascara)  <mark style="background-color: lightgreen;">[OK]</mark> 
+Protector de pantalla: <mark style="background-color: lightgreen;">[OK]</mark> 
+Encendido y visualización: <mark style="background-color: lightgreen;">[OK] * Último calcheck año 2022</mark> 
+Conector: [De la sonda(s)] <mark style="background-color: lightgreen;">[OK] contamainción leve</mark> 
+                   (USB) <mark style="background-color: lightgreen;">[OK] contamainción leve</mark>
+ 
+Accesorios: (Adaptador de voltaje) <b> No Registra</b>
+                (Porta electrodos)  <b> No registra</b>
+ 
+ 
+
+###ESTADO_FISICO_INTERNO###
+
+Carcasa: <mark style="background-color: lightgreen;">[OK] contamainción leve</mark> 
+Unidad óptica: (Emisores) <mark style="background-color: lightgreen;">[OK] contaminación leve</mark>
+                        (Receptores) <mark style="background-color: red; color: white;">[Crítico] con opacidad de algunos</mark>
+                         (Filtros) <mark style="background-color: orange;">[OK] contaminación l</mark>
+Tarjeta electrónica: (Circuitos)  <mark style="background-color: lightgreen;">[OK] contamainción leve</mark> 
+                    (Componentes) <mark style="background-color: lightgreen;">[OK] contamainción leve</mark> 
+                       (Pantalla) <mark style="background-color: lightgreen;">[OK] contamainción leve</mark> 
+                       (Teclado) <mark style="background-color: lightgreen;">[OK] contamainción leve</mark>
+
+<mark style="background-color: lightgreen;">[OK]</mark>
+<mark style="background-color: orange;">[Atención]</mark>
+<mark style="background-color: red; color: white;">[Crítico]</mark>
+
+###DE ACUERDO CON LOS RESULTADOS OBTENIDOS ¿SE REQUIEREN ACCIONES CORRECTIVAS O PREVENTIVAS?###
+
+Se sometieron los sensores a protocolos de limpieza y acondicionamiento.
+
+###MÉTODO_DE_VERIIFCACIÓN###
+
+Empleando estándares calcheck Hanna Instruments.
+
+Se realiza revisión de las mediciones empleando soluciones estándar para el ajuste y comprobación de calibración de ( pH) marca Hanna.
+
+
+###OBSERVACIONES###
+
+<b>Medidor (HI XXXX):</b>Durante la verificación, no se detectaron errores funcionales y las lecturas se encuentran dentro de los parámetros de especificación.
+<b> Sonda pH/ISE/ORP (HI XXXX):</b>
+
+En este caso es posible llevar a cabo mantenimiento preventivo con el fin de eliminar la contaminación.
+
+El mantenimiento preventivo incluye:
+- Limpieza general  de las placas electrónicas y conectores.
+- Limpieza específica de componentes electrónicos.
+- Limpieza específica de unidad óptica.
+- Limpieza especifica de los buses de conexión.
+- Limpieza externa.
+- Etiqueta e informe de mantenimiento.
+ 
+La garantía del servicio es de 2 meses y no aplica por daños relacionados a mala manipulación o el desgaste normal de componentes electrónicos o consumibles.
+
+• No utilice o almacene el equipo en ambientes contaminados o húmedos.
+• No agite, deje caer o someta el equipo a golpes contundentes.
+• No exponga el equipo a campos magnéticos fuertes.
+
+-Asegurarse de que la muestra no contiene residuos.
+-Siempre que se coloque el vial en la celda de medición, debe estar seco por fuera y libre de huellas dactilares, aceite o suciedad.
+-Evitar el contacto directo con las zonas de paso de luz del vial (aproximadamente 2 cm/1'' desde el fondo); se recomienda el uso de
+guantes durante la manipulación.
+-Limpie el vial con el paño de limpieza de microfibra HI731318 o con un paño sin pelusas.
+-Agitar el vial puede generar burbujas, causando lecturas más altas. Para obtener mediciones precisas, elimine estas burbujas colocando
+el vial en posición horizontal y realizando movimientos envolventes repetitivos.
+-No deje que la muestra reaccionada permanezca demasiado tiempo después de añadir el reactivo, ya que la exactitud se verá afectada.
+-Deseche la muestra inmediatamente después de que se haya tomado la lectura o el vidrio podría mancharse permanentemente.
+
+<b>Limpieza y cuidados especiales de los Sensores:
+Limpieza básica:</b>
+Enjuaga los sensores con agua destilada o purificada, preferiblemente dispensada desde atomizador, para eliminar residuos ligeros
+
+<b>-Limpieza profunda Sensor de pH:</b> Limpia el sensor frecuentemente para mantener su precisión. Para una limpieza profunda, sumérgelo en solución de limpieza de pH/ORP (HI 70663L) durante 15 minutos y enjuaga con agua destilada. Después, sumerge el sensor en solución de almacenamiento (HI70300) durante al menos una hora antes de realizar nuevas mediciones.
+
+<b>- Evita la Abrasión:</b> No frotes ni utilices materiales ásperos sobre el sensor, ya que podrías dañar el bulbo de vidrio sensible.
+
+<b> Almacenamiento de Sensores-pH:</b> Conserva el sensor de pH en una solución de almacenamiento adecuada (HI70300) cuando no esté en uso, evitando que el sensor se seque y pierda precisión. Si no se usa con frecuencia, verifica el nivel de la solución de almacenamiento al menos una vez por semana.
+
+<b>Nota:</b> * Nunca almacenes el electrodo en agua destilada o desionizada. El capuchón y solución de almacenamiento deben permanecer limpios.
+             * Introduzca aire al capuchón antes de extraerlo de la sonda, para evitar el efecto de succión sobre el tapón de la solución interna.
+             * Evite golpes o caídas, ya que puede generar daños   en la unidad de adquisición de datos del instrumento, sonda y sensores.
+
+
