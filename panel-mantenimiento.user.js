@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel Hanna - Informe de Mantenimiento
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Autocompletar Soluciones Estándar y Plantillas de Mantenimiento (ambos desde Google Sheets/GitHub) + contador de líneas y detección de errores de HTML en los campos de Resultados/Diagnóstico del Informe de Mantenimiento.
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/maintenancereport
@@ -42,7 +42,7 @@
 (function() {
     'use strict';
 
-    var APP_VERSION = '1.1';
+    var APP_VERSION = '1.2';
 
     // ==========================================
     // 0. SOLUCIONES ESTÁNDAR DESDE GOOGLE SHEETS (100% dinámico)
@@ -236,7 +236,11 @@
         datosPlantillasMto.forEach(function(fila, indice) {
             var categoria = fila.categoria || 'Sin categoría';
             if (!grupos[categoria]) { grupos[categoria] = []; orden.push(categoria); }
-            grupos[categoria].push({ clave: String(indice), etiqueta: '🧪 ' + fila.etiqueta });
+            // No se le antepone ningún emoji propio: la columna "etiqueta"
+            // del Sheet ya trae su propio ícono (ej. "✏️ Combos"), puesto a
+            // mano por quien llena el Sheet — agregar otro acá duplicaba el
+            // ícono en el panel.
+            grupos[categoria].push({ clave: String(indice), etiqueta: fila.etiqueta });
         });
         return orden.map(function(categoria) { return { categoria: categoria, items: grupos[categoria] }; });
     }
