@@ -9,6 +9,7 @@ Instala solo los que uses — cada uno vive en su propia página de la intranet 
 | Script | Dónde funciona | Qué hace | Link de instalación |
 |---|---|---|---|
 | **Panel de Control Intranet Hanna** | `.../stecnico/item/*/diagnosis` | Autocompleta lecturas/soluciones del informe de diagnóstico, con lotes/vencimientos sincronizados desde Google Sheets. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/panel-hanna.user.js) |
+| **Panel Hanna - Informe de Mantenimiento** | `.../stecnico/item/*/maintenancereport` | Autocompleta Soluciones Estándar (mismo Sheet que el panel de Diagnóstico) + contador de líneas y detección de errores de HTML en los campos de Resultados/Diagnóstico. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/panel-mantenimiento.user.js) |
 | **QR Pedidos SGP** | `.../sgp/item/*` | Genera un QR (SVG) con los datos del pedido (RUT, cotización, OTST, remisión, factura), descargable en SVG/PNG. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/qr-pedidos-sgp.user.js) |
 | **QR Órdenes de Trabajo** | `.../stecnico/item/*` | Genera un QR con el ID de la OT, fecha, NIT/cliente y correo de contacto; incluye versión lista para imprimir. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/qr-ordenes-trabajo.user.js) |
 | **WhatsApp Pre-Ingreso** | `.../stecnico/pre_ingreso/item/*` | Detecta el/los celular(es) del contacto y muestra botones de WhatsApp con un mensaje predeterminado. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/whatsapp-preingreso.user.js) |
@@ -303,6 +304,17 @@ Herramienta aparte para revisar el `.txt` de una plantilla completa antes de sub
 Desde v16.13, los 5 campos de Diagnóstico Preliminar (solo esos — no Mediciones ni Soluciones) también muestran un **contador de líneas** a la izquierda, como en un editor de código, con el mismo fondo blanco de siempre (no se agregó ningún panel de color nuevo) y una línea muy tenue separándolo del texto. El contador numera por línea del texto (separada por saltos de línea reales), igual que dice el aviso de error ("línea N").
 
 Desde v16.17, el número de cada línea queda pegado a su fila real aunque el párrafo sea largo y se envuelva en varias filas visuales dentro del campo (antes, en v16.13-v16.16, el contador asumía que cada línea ocupaba exactamente una fila, así que después del primer párrafo largo los números quedaban cada vez más atrasados respecto al texto). Ahora la posición de cada número se calcula midiendo dónde envuelve realmente el texto, no contando líneas de forma uniforme.
+
+## Informe de Mantenimiento: Soluciones Estándar + contador de líneas
+
+Script aparte (**Panel Hanna - Informe de Mantenimiento**, `panel-mantenimiento.user.js`) para la pestaña `.../stecnico/item/*/maintenancereport` — es una copia recortada del panel de Diagnóstico, con solo dos cosas:
+
+1. **Autocompletar de Soluciones Estándar**: el mismo botón "🧴 Elegir Soluciones Estándar…" con buscador, leyendo la MISMA hoja de Google Sheets que ya usa el panel de Diagnóstico (comparten hasta la caché local, así que si ya se cargó en una pestaña, la otra arranca con esos mismos datos). Junto al botón también hay un "🔄" para recargar el Sheet sin salir de la página y un "✏️" para abrir el Sheet en una pestaña nueva.
+2. **Contador de líneas + detección de errores de HTML**, igual que en Diagnóstico Preliminar (con la corrección de alineación de v16.17 desde el día uno), en los dos campos de texto de esta página: "Resultados obtenidos de las pruebas de verificación..." y "De acuerdo a los valores antes presentados se concluye...".
+
+A propósito NO incluye (todavía) Mediciones Iniciales/Finales ni Plantillas de Diagnóstico Preliminar por tipo de equipo — si más adelante se necesitan acá también, se agregan copiando esas secciones de `panel-hanna.user.js`.
+
+Es un script independiente con su propio `@version` (arranca en 1.0) y su propio `@match`, así que se instala aparte del panel de Diagnóstico (ver tabla de instalación arriba) — cada uno funciona sin que el otro esté instalado.
 
 ## Lineamientos del Cliente: aviso por NIT desde Google Sheets
 
