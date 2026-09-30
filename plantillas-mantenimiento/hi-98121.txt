@@ -1,0 +1,41 @@
+###HI 98121###
+<table border="1" align="center">
+  <tr>
+    <th>HI 98121 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      6.88 pH <b><font color="green">✔</font></b>
+    </td>
+    <td>7.01 ± 0.01 pH @25°C</td>
+    <td>±0.05 pH</td>
+  </tr>
+  <tr>
+    <td>
+      3.91 pH <b><font color="green">✔</font></b>
+    </td>
+    <td>4.01 ± 0.01 pH @25°C</td>
+    <td>±0.05 pH</td>
+  </tr>
+  <tr>
+    <td>
+      10.12 pH <b><font color="green">✔</font></b>
+    </td>
+    <td>10.01 ± 0.01 pH @25°C</td>
+    <td>±0.05 pH</td>
+  </tr>
+  <tr>
+    <td>421.2 mV <b><font color="green">✔</font></b></td>
+    <td>470 mV @25°C</td>
+    <td>±50 mV</td>
+  </tr>
+  <tr>
+    <td>
+      18.4 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>18.2 °C</td>
+    <td>±0.7 °C</td>
+  </tr>
+</table>

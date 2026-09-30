@@ -1,0 +1,59 @@
+###HI 98194###
+<table border="1" align="center">
+  <tr>
+    <th> HI 98194 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      6.98 pH (1.1mV) <b><font color="green">✔</font></b>
+    </td>
+    <td>7.01 pH @25°C (0mV )</td>
+    <td>±0.05 pH (±30mV)</td>
+  </tr>
+  <tr>
+    <td>
+      4.00 pH (172.5mV) <b><font color="green">✔</font></b>
+    </td>
+    <td>4.01 pH @25°C (177.48 mV)</td>
+    <td>±0.05 pH (±30mV)</td>
+  </tr>
+  <tr>
+    <td>
+      10.02 pH (-159.9 mV) <b><font color="green">✔</font></b>
+    </td>
+    <td>10.01 pH @25°C (-177.48 mV)</td>
+    <td>±0.05 pH (±30mV)</td>
+  </tr>
+  <tr>
+    <td>421.2 mV <b><font color="green">✔</font></b></td>
+    <td>470 mV @25°C</td>
+    <td>±50 mV</td>
+  </tr>
+  <tr>
+    <td>0.0 % OD <b><font color="green">✔</font></b></td>
+    <td>0% ± 0.1 OD @25°C</td>
+    <td>&lt;10 % OD</td>
+  </tr>
+  <tr>
+    <td>99.5 % OD <b><font color="green">✔</font></b></td>
+    <td>100% OD @25°C</td>
+    <td>90-120 % OD</td>
+  </tr>
+  <tr>
+    <td>1403 uS/cm <b><font color="green">✔</font></b></td>
+    <td>1413±5 uS/cm @25°C</td>
+    <td>±5.5% de la lectura</td>
+  </tr>
+  <tr>
+    <td>12.91 mS/cm <b><font color="green">✔</font></b></td>
+    <td>12880 ±50 uS/cm @25°C</td>
+    <td>±5.5% de la lectura</td>
+  </tr>
+  <tr>
+    <td>22.0 °C <b><font color="green">✔</font></b></td>
+    <td>22.2 °C</td>
+    <td>±0.7 °C</td>
+  </tr>
+</table>

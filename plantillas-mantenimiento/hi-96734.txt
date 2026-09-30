@@ -1,0 +1,22 @@
+###HI 96734###
+<table border="1" align="center">
+  <tr>
+    <th>HI 96734</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      4.00 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>4.00 mg/L CL2 F @25°C</td>
+    <td>±3% de la lectura</td>
+  </tr>
+  <tr>
+    <td>
+      4.00 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>4.00 mg/L CL2 L @25°C</td>
+    <td>±3% de la lectura</td>
+  </tr>
+</table>

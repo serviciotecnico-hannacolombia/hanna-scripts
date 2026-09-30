@@ -1,0 +1,53 @@
+###HI 5522-01###
+<table border="1" align="center">
+  <tr>
+    <th> HI 5522 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      7.03 pH (-3.1mV) <b><font color="green">✔</font></b>
+    </td>
+    <td>7.01 pH @25°C (0mV )</td>
+    <td>±0.05 pH (±30mV)</td>
+  </tr>
+  <tr>
+    <td>
+      4.03 pH (166.5mV) <b><font color="green">✔</font></b>
+    </td>
+    <td>4.01 pH @25°C (177.48 mV)</td>
+    <td>±0.05 pH (±30mV)</td>
+  </tr>
+  <tr>
+    <td>
+      10.04 pH (-170.9mV) <b><font color="green">✔</font></b>
+    </td>
+    <td>10.01 pH @25°C (-177.48 mV)</td>
+    <td>±0.05 pH (±30mV)</td>
+  </tr>
+   <tr>
+    <td>
+      1417 uS/cm <b><font color="green">✔</font></b>
+    </td>
+    <td>1413±5 uS/cm @25°C</td>
+    <td>±2.0% F.S</td>
+  </tr>
+  <tr>
+    <td>
+      12.93 mS/cm <b><font color="green">✔</font></b>
+    </td>
+    <td>12880 ±50 uS/cm @25°C</td>
+    <td>±2.0% F.S</td>
+  </tr>
+  <tr>
+    <td>
+      18.4 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>18.2 °C</td>
+    <td>±0.7 °C</td>
+  </tr>
+</table>
+<b>Condición 90% </b>  
+<b><FONT COLOR="green">✔</FONT></b>
+<FONT COLOR="red">✘  </FONT>

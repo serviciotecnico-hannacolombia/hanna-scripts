@@ -1,0 +1,22 @@
+###HI 96821###
+<table border="1" align="center">
+  <tr>
+    <th> HI 96821 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.3 g/100 mL <b><font color="green">✔</font></b>
+    </td>
+    <td> 0.3 g/100 mL  </td>
+    <td>±0.02 g/L</td>
+  </tr>
+  <tr>
+    <td>
+     1.002 SG  <b><font color="green">✔</font></b>
+    </td>
+    <td> 1.000 SG </td>
+    <td>±0.002 </td>
+  </tr>
+</table>

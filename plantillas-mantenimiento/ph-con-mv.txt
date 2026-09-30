@@ -1,0 +1,34 @@
+###pH con mV###
+<table border="1" align="center">
+  <tr>
+    <th>pH con mV</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      7.03 pH (-3.1mV) <b><font color="green">✔</font></b>
+    </td>
+    <td>7.01 pH @25°C (0mV )</td>
+    <td>±0.05 pH (±30mV)</td>
+  </tr>
+  <tr>
+    <td>
+      4.03 pH (166.5mV) <b><font color="green">✔</font></b>
+    </td>
+    <td>4.01 pH @25°C (177.48 mV)</td>
+    <td>±0.05 pH (±30mV)</td>
+  </tr>
+  <tr>
+    <td>
+      10.04 pH (-170.9mV) <b><font color="green">✔</font></b>
+    </td>
+    <td>10.01 pH @25°C (-177.48 mV)</td>
+    <td>±0.05 pH (±30mV)</td>
+  </tr>  
+  <tr>
+    <td>25.0 °C <b><font color="green">✔</font></b></td>
+    <td>25.0 °C</td>
+    <td>±0.5 °C</td>
+  </tr>
+</table>

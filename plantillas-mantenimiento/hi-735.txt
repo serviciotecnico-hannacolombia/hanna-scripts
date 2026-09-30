@@ -1,0 +1,22 @@
+###HI 735###
+<table border="1" align="center">
+  <tr>
+    <th>HI 735</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td>0 ppm @25°C</td>
+    <td>±6 ppm ±6% de la lectura @ 25 °C</td>
+  </tr>
+  <tr>
+    <td>
+      174 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td>175 ± 6ppm</td>
+    <td>±6 ppm ±6% de la lectura @ 25 °C</td>
+  </tr>
+</table>

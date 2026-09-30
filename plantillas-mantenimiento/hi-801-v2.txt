@@ -1,0 +1,36 @@
+###HI 801###
+<table border="1" align="center">
+  <tr>
+    <th>HI 801</th>
+    <th>Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      361.1nm <b><font color="green">✔</font></b>
+    </td>
+    <td>359.6 a 362.6 abs</td>
+    <td>±1.5 nm</td>
+  </tr>
+  <tr>
+    <td>
+      446.2nm <b><font color="green">✔</font></b>
+    </td>
+    <td>444.7 a 447.7 abs</td>
+    <td>±1.5 nm</td>
+  </tr>
+  <tr>
+    <td>
+      536.5nm <b><font color="green">✔</font></b>
+    </td>
+    <td>535.0 a 538.0 abs</td>
+    <td>±1.5 nm</td>
+  </tr>
+  <tr>
+    <td>
+      637.5nm <b><font color="green">✔</font></b>
+    </td>
+    <td>636.0 a 639.0 abs</td>
+    <td>±1.5 nm</td>
+  </tr>
+</table>

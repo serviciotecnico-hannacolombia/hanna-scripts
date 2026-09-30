@@ -1,0 +1,64 @@
+###Tarjeta análoga###
+<table border="1" align="center">
+  <tr>
+    <th>Tarjeta análoga</th>
+    <th>Equipo o soluciones de referencia</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      13.5 mV@1uA <b><font color="green">✔</font></b>
+    </td>
+    <td>13.1+ mV @1uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      28.4 mV@2uA <b><font color="green">✔</font></b>
+    </td>
+    <td>28.1+ mV @2uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      70.3 mV@5uA <b><font color="green">✔</font></b>
+    </td>
+    <td>70.2+ mV @5uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      146.1 mV@10uA <b><font color="green">✔</font></b>
+    </td>
+    <td>145.2+ mV @10uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      217.1 mV@15uA <b><font color="green">✔</font></b>
+    </td>
+    <td>218.3+ mV @15uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      288.0 mV@20uA <b><font color="green">✔</font></b>
+    </td>
+    <td>287.1+ mV @20uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      430.1 mV@30uA <b><font color="green">✔</font></b>
+    </td>
+    <td>431.8+ mV @30uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      568.3 mV@40uA <b><font color="green">✔</font></b>
+    </td>
+    <td>568.9+ mV @40uA</td>
+    <td>±2 mV</td>
+  </tr>
+</table>

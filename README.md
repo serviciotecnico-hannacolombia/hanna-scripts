@@ -305,16 +305,46 @@ Desde v16.13, los 5 campos de Diagnóstico Preliminar (solo esos — no Medicion
 
 Desde v16.17, el número de cada línea queda pegado a su fila real aunque el párrafo sea largo y se envuelva en varias filas visuales dentro del campo (antes, en v16.13-v16.16, el contador asumía que cada línea ocupaba exactamente una fila, así que después del primer párrafo largo los números quedaban cada vez más atrasados respecto al texto). Ahora la posición de cada número se calcula midiendo dónde envuelve realmente el texto, no contando líneas de forma uniforme.
 
-## Informe de Mantenimiento: Soluciones Estándar + contador de líneas
+## Informe de Mantenimiento: Soluciones Estándar + Plantillas + contador de líneas
 
-Script aparte (**Panel Hanna - Informe de Mantenimiento**, `panel-mantenimiento.user.js`) para la pestaña `.../stecnico/item/*/maintenancereport` — es una copia recortada del panel de Diagnóstico, con solo dos cosas:
+Script aparte (**Panel Hanna - Informe de Mantenimiento**, `panel-mantenimiento.user.js`) para la pestaña `.../stecnico/item/*/maintenancereport` — es una copia recortada del panel de Diagnóstico, con:
 
 1. **Autocompletar de Soluciones Estándar**: el mismo botón "🧴 Elegir Soluciones Estándar…" con buscador, leyendo la MISMA hoja de Google Sheets que ya usa el panel de Diagnóstico (comparten hasta la caché local, así que si ya se cargó en una pestaña, la otra arranca con esos mismos datos). Junto al botón también hay un "🔄" para recargar el Sheet sin salir de la página y un "✏️" para abrir el Sheet en una pestaña nueva.
 2. **Contador de líneas + detección de errores de HTML**, igual que en Diagnóstico Preliminar (con la corrección de alineación de v16.17 desde el día uno), en los dos campos de texto de esta página: "Resultados obtenidos de las pruebas de verificación..." y "De acuerdo a los valores antes presentados se concluye...".
+3. **(Desde v1.1) Plantillas de Mantenimiento** para el campo "Resultados": botón "🧪 Elegir Plantilla de Mantenimiento…" con buscador — igual mecánica de checklist que Soluciones Estándar. A diferencia de la plantilla de Diagnóstico Preliminar (que **reemplaza** el campo), acá cada plantilla elegida se **agrega** al final de lo que ya haya escrito, separada por una línea en blanco, así se pueden combinar varias pruebas en el mismo informe (ej. "Salida análoga pH" + "Simulador OD" + "Tarjeta análoga").
 
-A propósito NO incluye (todavía) Mediciones Iniciales/Finales ni Plantillas de Diagnóstico Preliminar por tipo de equipo — si más adelante se necesitan acá también, se agregan copiando esas secciones de `panel-hanna.user.js`.
+A propósito NO incluye (todavía) Mediciones Iniciales/Finales ni plantillas para el campo "Diagnóstico"/conclusiones — si más adelante se necesitan acá también, se agregan con el mismo patrón.
 
-Es un script independiente con su propio `@version` (arranca en 1.0) y su propio `@match`, así que se instala aparte del panel de Diagnóstico (ver tabla de instalación arriba) — cada uno funciona sin que el otro esté instalado.
+Es un script independiente con su propio `@version` y su propio `@match`, así que se instala aparte del panel de Diagnóstico (ver tabla de instalación arriba) — cada uno funciona sin que el otro esté instalado.
+
+### Plantillas de Mantenimiento: cómo agregar una nueva
+
+Igual mecánica que las plantillas de Diagnóstico Preliminar (ver sección de arriba), con dos diferencias:
+
+- Los archivos `.txt` viven en la carpeta **`plantillas-mantenimiento/`** de este repo (no `plantillas-diagnostico/`).
+- Cada archivo trae **una sola sección** (no 5), porque solo hay un campo destino ("Resultados"): la primera línea es `###Nombre de la prueba###` (solo para identificar el archivo al mirarlo — no se copia al campo) y el resto es el HTML tal cual se pega en el campo, normalmente una tabla como:
+
+  ```
+  ###Salida análoga pH###
+  <table border="1" align="center">
+    <tr>
+      <th>Salida análoga pH</th>
+      <th>V calculado</th>
+      <th>Tolerancia</th>
+    </tr>
+    <tr>
+      <td>12.06 mA <b><font color="green">✔</font></b></td>
+      <td>11.96 mA @20°C</td>
+      <td>±0.30 mA</td>
+    </tr>
+  </table>
+  ```
+
+Para agregar una plantilla nueva:
+
+1. Sube el `.txt` a la carpeta `plantillas-mantenimiento/` en GitHub.
+2. Agrega una fila en la pestaña **"mantenimientos"** del mismo Google Sheet de Soluciones/Mediciones/Plantillas, con las columnas `categoria | etiqueta | archivo` (el nombre exacto del archivo que subiste).
+3. Listo — sin tocar código. El técnico la ve en el buscador la próxima vez que abra el panel (o de inmediato si usa el botón "🔄").
 
 ## Lineamientos del Cliente: aviso por NIT desde Google Sheets
 

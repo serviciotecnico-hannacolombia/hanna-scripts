@@ -1,0 +1,50 @@
+###HI 97101C###
+<table border="1" align="center">
+  <tr>
+    <th>HI 97101C</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      7.0 pH <b><font color="green">✔</font></b>
+    </td>
+    <td>7.0 pH @25°C ± 0.1</td>
+    <td>±0.1 pH</td>
+  </tr>
+  <tr>
+    <td>
+      1.01 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>1.00 ± 0.03mg/L CL2 F @25°C</td>
+    <td>±0.03 mg/L ±3% de lectura</td>
+  </tr>
+  <tr>
+    <td>
+      1.00 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>1.00 ± 0.03mg/L CL2 T @25°C</td>
+    <td>±0.03 mg/L ±3% de lectura</td>
+  </tr>
+  <tr>
+    <td>
+      0.80 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>0.80 ± 0.07mg/L Iron LR @25°C</td>
+    <td>±0.01 mg/L ±8% o lectura</td>
+  </tr>
+  <tr>
+    <td>
+      2.6 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>2.6 ± 0.2mg/L Iode LR @25°C</td>
+    <td>±0.11 mg/L ± 5% de lectura</td>
+  </tr>
+  <tr>
+    <td>
+      2.00 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>2.01 ± 0.06mg/L Br @25°C</td>
+    <td>±0.08 mg/L ± 3% de lectura</td>
+  </tr>
+</table>

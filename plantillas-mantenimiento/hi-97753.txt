@@ -1,0 +1,15 @@
+###HI 97753###
+<table border="1" align="center">
+  <tr>
+    <th> HI 97753 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      10.4 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td> 10.1 ± 0.5 mg/L </td>
+    <td> ±0.5 mg/L ±6% de lectura </td>
+  </tr>
+</table>

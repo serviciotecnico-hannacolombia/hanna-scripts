@@ -1,0 +1,29 @@
+###HI 96735###
+<table border="1" align="center">
+  <tr>
+    <th>HI 96735</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      150 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>150 mg/L @25°C</td>
+    <td>±5 mg/L +10 de lectura</td>
+  </tr>
+  <tr>
+    <td>
+      350 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>350 mg/L @25°C</td>
+    <td>±7 mg/L +15 de lectura</td>
+  </tr>
+  <tr>
+    <td>
+      525 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>520 mg/L @25°C</td>
+    <td>±10 mg/L +20 del estándar</td>
+  </tr>
+</table>

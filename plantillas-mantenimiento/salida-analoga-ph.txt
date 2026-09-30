@@ -1,0 +1,29 @@
+###Salida análoga pH###
+<table border="1" align="center">
+  <tr>
+    <th>Salida análoga pH</th>
+    <th>V calculado</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      12.06 mA <b><font color="green">✔</font></b>
+    </td>
+    <td>11.96 mA @20°C</td>
+    <td>±0.30 mA</td>
+  </tr>
+  <tr>
+    <td>
+      8.61 mA <b><font color="green">✔</font></b>
+    </td>
+    <td>8.58 mA @20°C</td>
+    <td>±0.30 mA</td>
+  </tr>
+  <tr>
+    <td>
+      15.48 mA <b><font color="green">✔</font></b>
+    </td>
+    <td>15.40 mA @20°C</td>
+    <td>±0.30 mA</td>
+  </tr>
+</table>

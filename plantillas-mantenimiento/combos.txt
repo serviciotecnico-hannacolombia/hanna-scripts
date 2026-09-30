@@ -1,0 +1,50 @@
+###Combos###
+<table border="1" align="center">
+  <tr>
+    <th>Combos</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      7.01 pH <b><font color="green">✔</font></b>
+    </td>
+    <td>7.01 ± 0.1 pH @25°C</td>
+    <td>±0.05 pH</td>
+  </tr>
+  <tr>
+    <td>
+      4.01 pH <b><font color="green">✔</font></b>
+    </td>
+    <td>4.01 ± 0.1 pH @25°C</td>
+    <td>±0.05 pH</td>
+  </tr>
+  <tr>
+    <td>
+      10.00 pH <b><font color="green">✔</font></b>
+    </td>
+    <td>10.01 ± 0.1 pH @25°C</td>
+    <td>±0.05 pH</td>
+  </tr>
+  <tr>
+    <td>
+      1417 uS/cm <b><font color="green">✔</font></b>
+    </td>
+    <td>1413±5 uS/cm @25°C</td>
+    <td>±2.0% F.S</td>
+  </tr>
+  <tr>
+    <td>
+      12.93 mS/cm <b><font color="green">✔</font></b>
+    </td>
+    <td>12880 ±50 uS/cm @25°C</td>
+    <td>±2.0% F.S</td>
+  </tr>
+  <tr>
+    <td>
+      18.4 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>18.2 °C</td>
+    <td>±0.7 °C</td>
+  </tr>
+</table>

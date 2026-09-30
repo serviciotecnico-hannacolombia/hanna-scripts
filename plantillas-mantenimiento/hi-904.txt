@@ -1,0 +1,36 @@
+###HI 904###
+<table border="1" align="center">
+  <tr>
+    <th> HI 904 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      98.0 mV@1uA <b><font color="green">✔</font></b>
+    </td>
+    <td> 99.1 mV@1uA </td>
+    <td> ±2 mV </td>
+  </tr>
+  <tr>
+    <td>
+      199 mV@2uA <b><font color="green">✔</font></b>
+    </td>
+    <td> 199.3 mV@2uA </td>
+    <td> ±2 mV </td>
+  </tr>
+  <tr>
+    <td>
+      500 mV@5uA <b><font color="green">✔</font></b>
+    </td>
+    <td> 500.6 mV@5uA </td>
+    <td> ±2 mV </td>
+  </tr>
+  <tr>
+    <td>
+      1000 mV@10uA <b><font color="green">✔</font></b>
+    </td>
+    <td> 999.6 mV@10uA </td>
+    <td> ±2 mV </td>
+  </tr>
+   </table>

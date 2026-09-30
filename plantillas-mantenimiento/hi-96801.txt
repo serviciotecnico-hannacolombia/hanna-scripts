@@ -1,0 +1,22 @@
+###HI 96801###
+<table border="1" align="center">
+  <tr>
+    <th> HI 96801 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.0 % Brix @18.2°C <b><font color="green">✔</font></b>
+    </td>
+    <td>0.0 ±0.2 % Brix @ 20°C </td>
+    <td>±0.2 % Brix </td>
+  </tr>
+  <tr>
+    <td>
+     49.9 % Brix @18.2°C <b><font color="green">✔</font></b>
+    </td>
+    <td> 50.0 ±0.2% Brix @ 20°C </td>
+    <td>±0.2 % Brix</td>
+  </tr>
+</table>

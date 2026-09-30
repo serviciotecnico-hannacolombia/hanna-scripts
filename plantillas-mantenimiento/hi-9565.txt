@@ -1,0 +1,29 @@
+###HI 9565###
+<table border="1" align="center">
+  <tr>
+    <th>HI 9565</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      65 % HR <b><font color="green">✔</font></b>
+    </td>
+    <td>65 % HR</td>
+    <td>±3% HR (50 a 85% HR); ±5% HR (> 85% HR)</td>
+  </tr>
+  <tr>
+    <td>
+      52 % HR <b><font color="green">✔</font></b>
+    </td>
+    <td>52 % HR</td>
+    <td>±3% HR (50 a 85% HR); ±5% HR (> 85% HR)</td>
+  </tr>
+  <tr>
+    <td>
+      18.2 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>18.2 °C</td>
+    <td>±0.7 °C</td>
+  </tr>
+</table>

@@ -1,0 +1,22 @@
+###HI 97727###
+<table border="1" align="center">
+  <tr>
+    <th>97727</th>
+    <th>Solución</th>
+    <th>Tolerancia Instrumento</th>
+  </tr>
+  <tr>
+    <td>
+      0.0 PCU <b><font color="green">✔</font></b>
+    </td>
+    <td>0.0 PCU @25°C</td>
+    <td>±10 PCU ±5% de lectura</td>
+  </tr>
+  <tr>
+    <td>
+      155 PCU <b><font color="green">✔</font></b>
+    </td>
+    <td>254 ±10 PCU @25°C</td>
+    <td>±10 PCU ±5% de lectura</td>
+  </tr>
+</table>

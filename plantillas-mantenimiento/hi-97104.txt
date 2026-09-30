@@ -1,0 +1,36 @@
+###HI 97104###
+<table border="1" align="center">
+  <tr>
+    <th> HI 97104 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+     1.00 pH <b><font color="green">✔</font></b>
+    </td>
+    <td> 1.01 ± 0.03 mg/L de Cl </td>
+    <td> ±0.03 mg/L ±3% de lectura a 25 °C </td>
+  </tr>
+  <tr>
+    <td>
+      7.0 ± 0.1 pH <b><font color="green">✔</font></b>
+    </td>
+    <td> 7.0 ± 0.1 pH </td>
+    <td> ±0.1 pH de lectura a 25 °C</td>
+  </tr>
+  <tr>
+    <td>
+      21 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td> 20 ± 1 mg/L CYA </td>
+    <td> ±1 mg/L ±15 % de lectura a 25 °C</td>
+  </tr>
+  <tr>
+    <td>
+      198 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td> 202 ± 6 mg/L Alk </td>
+    <td> ±5 mg/L ±5% de lectura a 25 °C </td>
+  </tr>
+</table>

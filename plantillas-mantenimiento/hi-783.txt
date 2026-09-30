@@ -1,0 +1,22 @@
+###HI 783###
+<table border="1" align="center">
+  <tr>
+    <th>HI 783</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.00 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td>0.00 ppm @25°C</td>
+    <td>±5 % de la lectura a 25 °C (77 °F)</td>
+  </tr>
+  <tr>
+    <td>
+      1370 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td>1400 ±70 ppm @25°C</td>
+    <td>±5 % de la lectura a 25 °C (77 °F)</td>
+  </tr>
+</table>

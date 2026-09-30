@@ -1,0 +1,29 @@
+###HI 96710###
+<table border="1" align="center">
+  <tr>
+    <th>HI 96710</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      6.9 pH <b><font color="green">✔</font></b>
+    </td>
+    <td>7.0 pH @25°C</td>
+    <td>±0.2 pH</td>
+  </tr>
+  <tr>
+    <td>
+      1.01 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>1.00 ± 0.03mg/L CL2 F @25°C</td>
+    <td>±0.03 mg/L ±3% de lectura</td>
+  </tr>
+  <tr>
+    <td>
+      1.00 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>1.00 ± 0.03mg/L CL2 T @25°C</td>
+    <td>±0.03 mg/L ±3% de lectura</td>
+  </tr>
+</table>

@@ -1,0 +1,29 @@
+###BL 20-1###
+<table border="1" align="center">
+  <tr>
+    <th>BL 20-1</th>
+    <th>Referencia</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      20% <b><font color="green">✔</font></b>
+    </td>
+    <td>20% @21°C</td>
+    <td>No aplica</td>
+  </tr>
+  <tr>
+    <td>
+      50% <b><font color="green">✔</font></b>
+    </td>
+    <td>50% @21°C</td>
+    <td>No aplica</td>
+  </tr>
+  <tr>
+    <td>
+      100% <b><font color="green">✔</font></b>
+    </td>
+    <td>100% @21°C</td>
+    <td>No aplica</td>
+  </tr>
+</table>

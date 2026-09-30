@@ -1,0 +1,22 @@
+###HI 772###
+<table border="1" align="center">
+  <tr>
+    <th>HI 772</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.00 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td>0.00 ppm @25°C</td>
+    <td>±3 ppm ± 5% de lectura</td>
+  </tr>
+  <tr>
+    <td>
+      200 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td>200 ±10 ppm @25°C</td>
+    <td>±3 ppm ± 5% de lectura</td>
+  </tr>
+</table>

@@ -1,0 +1,20 @@
+###HI 98303###
+<table border="1" align="center">
+<tbody>
+<tr>
+<th>HI 98303</th>
+<th>Sol. Est&aacute;ndar</th>
+<th>Tolerancia</th>
+</tr>
+<tr>
+<td>0uS/cm <strong><span style="color: green;">✔</span></strong></</td>
+<td>0 uS/cm @25&deg;C</td>
+<td>--</td>
+</tr>
+<tr>
+<td>1413 uS/cm <strong><span style="color: green;">✔</span></strong></td>
+<td>1413&plusmn;5 uS/cm @25&deg;C</td>
+<td>&plusmn;2% F.S</td>
+</tr>
+</tbody>
+</table>

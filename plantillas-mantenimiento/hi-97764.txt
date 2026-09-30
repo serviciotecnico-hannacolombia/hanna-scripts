@@ -1,0 +1,22 @@
+###HI 97764###
+<table border="1" align="center">
+  <tr>
+    <th>HI 97769</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      1.01 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>1.00 ± 0.03mg/L @25°C</td>
+    <td>±0.03 mg/L ±3% de lectura</td>
+  </tr>
+  <tr>
+    <td>
+      1.00 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>1.00 ± 0.03mg/L @25°C</td>
+    <td>±0.03 mg/L ±3% de lectura</td>
+  </tr>
+</table>

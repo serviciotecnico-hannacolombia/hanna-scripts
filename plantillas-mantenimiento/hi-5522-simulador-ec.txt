@@ -1,0 +1,43 @@
+###HI 5522###
+<table border="1" align="center">
+  <tr>
+    <th> HI 5521-01  ( Simulador )</th>
+    <th> Equipo de referencia  </th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td> 0.000 uS/cm <b><font color="green">✔</font></b></td>
+    <td> 0.000 uS/cm </td>
+    <td>±1% de lectura (±0.01 µS/cm)</td>
+  </tr>
+<tr>
+    <td>  0.100uS/cm uS/cm  <b><font color="green">✔</font></b></td>
+    <td>  0.100uS/cm uS/cm</td>
+    <td>±1% de lectura (±0.01 µS/cm)</td>
+  </tr>
+  <tr>
+    <td> 1.000uS/cm  <b><font color="green">✔</font></b></td>
+    <td> 1.000uS/cm</td>
+    <td>±1% de lectura (±0.01 µS/cm)</td>
+  </tr>
+   <tr>
+    <td> 10.00 us/cm  <b><font color="green">✔</font></b></td>
+    <td> 10.00 us/cm </td>
+    <td>±1% de lectura (±0.01 µS/cm)</td>
+  </tr>
+  <tr>
+    <td> 100.0 uS/cm  <b><font color="green">✔</font></b></td>
+    <td> 100.0 uS/cm </td>
+    <td>±1% de lectura (±0.01 µS/cm)</td>
+  </tr>
+ <tr>
+    <td> 10.00 mS/cm  <b><font color="green">✔</font></b></td>
+    <td> 10.00 mS/cm </td>
+    <td>±1% de lectura (±0.01 µS/cm)</td>
+  </tr>
+  <tr>
+    <td>25.0 °C <b><font color="green">✔</font></b></td>
+    <td>25.0 °C</td>
+    <td>±0.5 °C</td>
+  </tr>
+</table>

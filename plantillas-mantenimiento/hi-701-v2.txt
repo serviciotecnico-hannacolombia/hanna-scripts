@@ -1,0 +1,22 @@
+###HI 701###
+<table border="1" align="center">
+  <tr>
+    <th> HI701 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td>0±0ppm @25°C</td>
+    <td>±20 ppm ± 5% de la lectura</td>
+  </tr>
+  <tr>
+    <td>
+      1.00 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td> 1.00(±0.05)ppm </td>
+    <td> ±0.03 ppm ±3% de lectura </td>
+  </tr>
+</table>

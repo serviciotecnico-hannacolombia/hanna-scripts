@@ -1,0 +1,29 @@
+###HI 839800###
+<table border="1" align="center">
+  <tr>
+    <th> HI 839800 </th>
+    <th>Equ. Patrón</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      19.2 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>19.2 °C</td>
+    <td>±0.7 °C </td>
+  </tr>
+  <tr>
+    <td>
+      104.5 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>105.0 °C</td>
+    <td>±0.7 °C </td>
+  </tr>
+  <tr>
+    <td>
+      150.0 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>150.0 °C</td>
+    <td>±0.7 °C </td>
+  </tr>
+</table>

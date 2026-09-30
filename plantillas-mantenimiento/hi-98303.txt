@@ -1,0 +1,27 @@
+###HI 98303###
+<table border="1" align="center">
+  <tr>
+    <th>HI 98303 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td> 0 uS/cm <b><font color="green">✔</font></b></td>
+    <td> 0 uS/cm</td>
+    <td>máximo 10 uS/cm</td>
+  </tr>
+<tr>
+    <td>
+      1414 uS/cm <b><font color="green">✔</font></b>
+    </td>
+    <td>1413±5 uS/cm @25°C</td>
+    <td>±2.0% F.S</td>
+  </tr>
+  <tr>
+    <td>
+      18.4 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>18.2 °C</td>
+    <td>±0.7 °C</td>
+  </tr>
+</table>

@@ -1,0 +1,15 @@
+###HI 97751C###
+<table border="1" align="center">
+  <tr>
+    <th> HI 97751C </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      75 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td> 75 ± 5 mg/L </td>
+    <td> ±5 mg/L ±3% de lectura </td>
+  </tr>
+</table>

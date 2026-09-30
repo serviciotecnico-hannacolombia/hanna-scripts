@@ -1,0 +1,15 @@
+###HI 983322###
+<table border="1" align="center">
+  <tr>
+    <th> HI 983322</th>
+    <th>SIMULADOR</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      10.05 uS <b><font color="green">✔</font></b>
+    </td>
+    <td> 10.00 uS </td>
+    <td> ±2% f.s </td>
+  </tr>
+</table>

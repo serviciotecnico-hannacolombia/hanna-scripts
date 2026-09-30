@@ -1,0 +1,29 @@
+###HI 93703###
+<table border="1" align="center">
+  <tr>
+    <th>HI 93703</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.0 FTU <b><font color="green">✔</font></b>
+    </td>
+    <td>0.0 FTU @25°C < 0.1</td>
+    <td>±5% F.S. (0 a 10 FTU)</td>
+  </tr>
+  <tr>
+    <td>
+      10.16 FTU <b><font color="green">✔</font></b>
+    </td>
+    <td>10.00 FTU @25°C ± 0.20</td>
+    <td>±10% F.S. (10 a 50 FTU)</td>
+  </tr>
+  <tr>
+    <td>
+      501 FTU <b><font color="green">✔</font></b>
+    </td>
+    <td>500 FTU @25°C ± 10</td>
+    <td>±5% F.S. (50 a 1000 FTU)</td>
+  </tr>
+</table>

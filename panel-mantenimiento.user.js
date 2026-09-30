@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Panel Hanna - Informe de Mantenimiento
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Autocompletar Soluciones Estándar (mismo Google Sheet del panel de Diagnóstico) + contador de líneas y detección de errores de HTML en los campos de Resultados/Diagnóstico del Informe de Mantenimiento.
+// @version      1.1
+// @description  Autocompletar Soluciones Estándar y Plantillas de Mantenimiento (ambos desde Google Sheets/GitHub) + contador de líneas y detección de errores de HTML en los campos de Resultados/Diagnóstico del Informe de Mantenimiento.
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/maintenancereport
 // @grant        none
@@ -12,7 +12,7 @@
 
 // NOTA GENERAL: este script es una copia recortada de panel-hanna.user.js
 // (el de la pestaña "Diagnóstico"), para la pestaña "Informe de Mantenimiento"
-// (".../maintenancereport"). Trae SOLO dos cosas, tal como se pidió:
+// (".../maintenancereport"). Trae:
 //
 //   1. El mismo autocompletar de "Soluciones Estándar" (checklist con
 //      buscador), leyendo la MISMA hoja de Google Sheets que ya usa el panel
@@ -21,16 +21,28 @@
 //   2. El contador de líneas + detección de errores de HTML (etiquetas sin
 //      cerrar, cruzadas, etc.) en los 2 campos de texto de esta página
 //      ("RM_resultados" y "RM_diagnostico").
+//   3. (Desde v1.1) Plantillas de Mantenimiento para el campo "Resultados"
+//      ("RM_resultados"): un checklist con buscador, igual que Soluciones
+//      Estándar, que agrega (NO reemplaza) el texto de cada plantilla
+//      elegida al final del campo — así se pueden combinar varias pruebas
+//      en el mismo informe (ej. "Salida análoga pH" + "Simulador OD" +
+//      "Tarjeta análoga"). Los archivos .txt viven en la carpeta
+//      "plantillas-mantenimiento/" de este mismo repo (igual mecánica que
+//      "plantillas-diagnostico/"), y la lista sale de una pestaña nueva del
+//      mismo Google Sheet ("mantenimientos": categoria | etiqueta | archivo).
+//      A diferencia de las plantillas de Diagnóstico Preliminar (5 secciones
+//      por archivo, una por campo), acá cada archivo trae UNA sola sección
+//      ("###Nombre de la prueba###" + el HTML de su tabla), porque solo hay
+//      un campo destino ("Resultados").
 //
-// A propósito NO incluye: Mediciones Iniciales/Finales, ni Plantillas de
-// Diagnóstico Preliminar por tipo de equipo (el usuario indicó que por ahora
-// no se van a usar acá, aunque probablemente sí a futuro — cuando se
-// necesiten, se agregan copiando esas secciones de panel-hanna.user.js).
+// A propósito NO incluye Mediciones Iniciales/Finales ni plantillas para el
+// campo "Diagnóstico"/conclusiones — si más adelante se necesitan, se
+// agregan con el mismo patrón.
 
 (function() {
     'use strict';
 
-    var APP_VERSION = '1.0';
+    var APP_VERSION = '1.1';
 
     // ==========================================
     // 0. SOLUCIONES ESTÁNDAR DESDE GOOGLE SHEETS (100% dinámico)
@@ -143,6 +155,170 @@
             return;
         }
         window.open(SHEET_EDIT_URL, '_blank');
+    }
+
+    // ==========================================
+    // 0b. PLANTILLAS DE MANTENIMIENTO PARA EL CAMPO "RESULTADOS" (desde v1.1)
+    // ==========================================
+    // Pestaña NUEVA ("mantenimientos") en el MISMO Google Sheet que Soluciones,
+    // con estas columnas exactas (encabezado en la fila 1):
+    //   categoria | etiqueta | archivo
+    // "archivo" es el nombre del .txt correspondiente dentro de la carpeta
+    // "plantillas-mantenimiento/" de este mismo repo de GitHub. Agregar una
+    // plantilla nueva es: subir el .txt a esa carpeta + agregar una fila al
+    // Sheet — cero cambios de código (mismo criterio que "plantillas" en el
+    // panel de Diagnóstico).
+    var SHEET_PLANTILLAS_MTO_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT2t_Y1keodEQiK9Iv4C8PoYmkAe-dFDgVek2z4fAr9IACCV-XDzFvB8jnrBB6J5t4uUwgpwn2W9CSz/pub?gid=126161581&single=true&output=csv';
+    var SHEET_EDIT_URL_MTO = 'https://docs.google.com/spreadsheets/d/1AzJX5B-myRtumple68r7ZXGpE7Xc3nLtkddG5i9rD98/edit?gid=126161581#gid=126161581';
+    var GITHUB_PLANTILLAS_MTO_BASE = 'https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/plantillas-mantenimiento/';
+
+    var CACHE_KEY_PLANTILLAS_MTO = 'hanna_sheet_cache_plantillas_mantenimiento_v1';
+    // [{ categoria: "Tester", etiqueta: "Salida análoga pH", archivo: "salida-analoga-ph.txt" }, ...]
+    var datosPlantillasMto = [];
+    var sheetPlantillasMtoUltimaActualizacion = null;
+
+    function aplicarFilasPlantillasMto(filas) {
+        var nuevo = [];
+        filas.forEach(function(campos) {
+            var categoria = (campos[0] || '').trim();
+            var etiqueta = (campos[1] || '').trim();
+            var archivo = (campos[2] || '').trim();
+            if (!archivo) return; // fila vacía o sin archivo: se ignora
+            nuevo.push({
+                categoria: categoria || 'Sin categoría',
+                etiqueta: etiqueta || archivo,
+                archivo: archivo
+            });
+        });
+        datosPlantillasMto = nuevo;
+    }
+
+    function guardarCachePlantillasMto(texto) {
+        try {
+            localStorage.setItem(CACHE_KEY_PLANTILLAS_MTO, texto);
+            localStorage.setItem(CACHE_KEY_PLANTILLAS_MTO + '_ts', new Date().toISOString());
+        } catch (e) { /* localStorage no disponible, seguimos sin cache */ }
+    }
+
+    function cargarCachePlantillasMto() {
+        try {
+            var texto = localStorage.getItem(CACHE_KEY_PLANTILLAS_MTO);
+            var ts = localStorage.getItem(CACHE_KEY_PLANTILLAS_MTO + '_ts');
+            if (texto) {
+                aplicarFilasPlantillasMto(parseCSV(texto));
+                sheetPlantillasMtoUltimaActualizacion = ts ? new Date(ts) : null;
+            }
+        } catch (e) { /* nada que cargar */ }
+    }
+
+    function cargarDatosPlantillasMtoSheet(callback) {
+        fetch(SHEET_PLANTILLAS_MTO_CSV_URL, { cache: 'no-store' })
+            .then(function(r) { return r.text(); })
+            .then(function(texto) {
+                aplicarFilasPlantillasMto(parseCSV(texto));
+                sheetPlantillasMtoUltimaActualizacion = new Date();
+                guardarCachePlantillasMto(texto);
+                if (callback) callback(true);
+            })
+            .catch(function(err) {
+                console.warn('[Panel Mantenimiento] No se pudo leer el Sheet de plantillas de mantenimiento, usando último dato conocido.', err);
+                if (callback) callback(false);
+            });
+    }
+
+    function abrirEditorSheetPlantillasMto() {
+        window.open(SHEET_EDIT_URL_MTO, '_blank');
+    }
+
+    function construirPlantillasMtoAgrupadas() {
+        var grupos = {};
+        var orden = [];
+        datosPlantillasMto.forEach(function(fila, indice) {
+            var categoria = fila.categoria || 'Sin categoría';
+            if (!grupos[categoria]) { grupos[categoria] = []; orden.push(categoria); }
+            grupos[categoria].push({ clave: String(indice), etiqueta: '🧪 ' + fila.etiqueta });
+        });
+        return orden.map(function(categoria) { return { categoria: categoria, items: grupos[categoria] }; });
+    }
+
+    // Descarga el .txt de la plantilla (sin caché de navegador) y, si falla,
+    // usa la última copia guardada en localStorage — mismo criterio que
+    // obtenerTextoPlantilla en panel-hanna.user.js. Se cachea por nombre de
+    // ARCHIVO (no por índice de fila), para que sobreviva a que se reordenen
+    // filas en el Sheet.
+    function obtenerTextoPlantillaMto(plantilla, callback) {
+        var cacheKey = 'hanna_plantilla_mantenimiento_cache_' + plantilla.archivo;
+        fetch(plantilla.url, { cache: 'no-store' })
+            .then(function(r) { return r.text(); })
+            .then(function(texto) {
+                try { localStorage.setItem(cacheKey, texto); } catch (e) { /* sin cache, no pasa nada */ }
+                callback(texto);
+            })
+            .catch(function(err) {
+                console.warn('[Panel Mantenimiento] No se pudo descargar la plantilla "' + plantilla.etiqueta + '".', err);
+                var cache = null;
+                try { cache = localStorage.getItem(cacheKey); } catch (e) { /* nada que usar */ }
+                if (cache) {
+                    callback(cache);
+                } else {
+                    alert('No se pudo descargar la plantilla "' + plantilla.etiqueta + '" y no hay una copia guardada localmente. Revisa tu conexión e intenta de nuevo.');
+                    callback(null);
+                }
+            });
+    }
+
+    // A diferencia de las plantillas de Diagnóstico Preliminar (5 secciones
+    // por archivo, una por campo), acá cada archivo trae UNA sola sección:
+    // solo se le quita la primera línea "###Nombre###" (que sirve para
+    // identificar la plantilla al mirar el archivo, no para nada del
+    // formulario) y se usa el resto tal cual.
+    function parsearPlantillaMto(texto) {
+        return (texto || '')
+            .replace(/\r\n/g, '\n')
+            .replace(/^\s*###[^\n]*###[ \t]*\n?/, '')
+            .replace(/\s+$/, '');
+    }
+
+    var panelesPlantillasMtoRef = [];
+
+    function refrescarPanelesPlantillasMto() {
+        var agrupadas = construirPlantillasMtoAgrupadas();
+        panelesPlantillasMtoRef.forEach(function(panel) { panel.poblar(agrupadas); });
+    }
+
+    // Agrega (NO reemplaza) el texto de cada plantilla elegida al final de lo
+    // que ya haya en "campo", separado por una línea en blanco — así se
+    // pueden combinar varias pruebas en el mismo informe. Las plantillas se
+    // descargan en paralelo pero se agregan en el orden en que se
+    // seleccionaron (no en el orden en que termine de responder cada una).
+    function cargarPlantillasMantenimientoSeleccionadas(campo, clavesSeleccionadas) {
+        if (clavesSeleccionadas.length === 0) return;
+        var pendientes = clavesSeleccionadas.length;
+        var resultados = new Array(clavesSeleccionadas.length);
+
+        function terminar() {
+            var bloques = resultados.filter(function(t) { return t; });
+            if (bloques.length === 0) return; // ya se avisó del error al descargar
+            var actual = campo.value.trim();
+            campo.value = actual ? (actual + '\n\n' + bloques.join('\n\n')) : bloques.join('\n\n');
+            dispararEventos(campo);
+        }
+
+        clavesSeleccionadas.forEach(function(clave, indice) {
+            var fila = datosPlantillasMto[Number(clave)];
+            if (!fila) {
+                resultados[indice] = null;
+                pendientes--;
+                if (pendientes === 0) terminar();
+                return;
+            }
+            var plantilla = { etiqueta: fila.etiqueta, archivo: fila.archivo, url: GITHUB_PLANTILLAS_MTO_BASE + fila.archivo };
+            obtenerTextoPlantillaMto(plantilla, function(texto) {
+                resultados[indice] = texto ? parsearPlantillaMto(texto) : null;
+                pendientes--;
+                if (pendientes === 0) terminar();
+            });
+        });
     }
 
     // ==========================================
@@ -303,6 +479,17 @@
             return true;
         }
         contenedor.parentNode.insertBefore(elementoNuevo, contenedor);
+        return true;
+    }
+
+    // Igual que anclarAntesDeTabla, pero para anclar el panel justo encima
+    // de un <textarea> suelto (el campo "Resultados"), no de una tabla.
+    function anclarAntesDeCampo(campoReferencia, elementoNuevo) {
+        if (!campoReferencia || !campoReferencia.parentNode) return false;
+        if (campoReferencia.previousElementSibling && campoReferencia.previousElementSibling.className === 'hanna-panel-inline') {
+            return true;
+        }
+        campoReferencia.parentNode.insertBefore(elementoNuevo, campoReferencia);
         return true;
     }
 
@@ -585,7 +772,7 @@
         return { barra: barra, poblar: poblar };
     }
 
-    var controlesInyectados = { soluciones: {} };
+    var controlesInyectados = { soluciones: {}, plantillasMto: {} };
     var panelesSolucionesRef = [];
 
     function refrescarMenuSoluciones() {
@@ -628,6 +815,36 @@
             if (anclarAntesDeTabla(refCampo, panel.barra)) {
                 controlesInyectados.soluciones[rev] = true;
                 inyectarBotonesLimpiarFila(tabla);
+            }
+        });
+    }
+
+    // El panel de plantillas queda anclado justo encima del campo
+    // "Resultados". Se identifica cada campo por su id/name (no por índice
+    // de la NodeList) para que "controlesInyectados.plantillasMto" no se
+    // confunda si el DOM se reordena.
+    function inyectarPanelesPlantillasMantenimiento() {
+        var campos = document.querySelectorAll('textarea[id^="RM_resultados"], textarea[name^="RM_resultados"]');
+        campos.forEach(function(campo, indice) {
+            var clave = campo.id || campo.name || ('idx' + indice);
+            if (controlesInyectados.plantillasMto[clave]) return;
+
+            var panel = crearPanelChecklist(construirPlantillasMtoAgrupadas(), '#17a2b8', '🧪 Elegir Plantilla de Mantenimiento…', function(clavesSeleccionadas) {
+                cargarPlantillasMantenimientoSeleccionadas(campo, clavesSeleccionadas);
+            });
+            panelesPlantillasMtoRef.push(panel);
+
+            var filaBotonesPlantillas = panel.barra.firstChild;
+            filaBotonesPlantillas.appendChild(crearBotonIcono('✏️', 'Abrir el Google Sheet de plantillas de mantenimiento', '#17a2b8', abrirEditorSheetPlantillasMto));
+            filaBotonesPlantillas.appendChild(crearBotonIcono('🔄', 'Recargar plantillas de mantenimiento desde el Sheet', '#17a2b8', function() {
+                cargarDatosPlantillasMtoSheet(function(ok) {
+                    refrescarPanelesPlantillasMto();
+                    alert(ok ? 'Plantillas de mantenimiento actualizadas desde el Sheet.' : 'No se pudo conectar al Sheet. Se mantienen los últimos datos conocidos.');
+                });
+            }));
+
+            if (anclarAntesDeCampo(campo, panel.barra)) {
+                controlesInyectados.plantillasMto[clave] = true;
             }
         });
     }
@@ -1007,6 +1224,7 @@
 
     function intentarInyectarControles() {
         inyectarPanelesSoluciones();
+        inyectarPanelesPlantillasMantenimiento();
         activarResaltadoCampos();
     }
 
@@ -1017,8 +1235,12 @@
     observadorDOM.observe(document.body, { childList: true, subtree: true });
 
     cargarCache();
+    cargarCachePlantillasMto();
     cargarDatosSheet(function() {
         refrescarMenuSoluciones();
+    });
+    cargarDatosPlantillasMtoSheet(function() {
+        refrescarPanelesPlantillasMto();
     });
 
     intentarInyectarControles();

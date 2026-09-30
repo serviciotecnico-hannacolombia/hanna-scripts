@@ -1,0 +1,15 @@
+###HI 98308###
+<table border="1" align="center">
+  <tr>
+    <th>HI 98308</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      84 uS/cm <b><font color="green">✔</font></b>
+    </td>
+    <td>84±1 uS/cm @25°C</td>
+    <td>±2% F.S</td>
+  </tr>
+</table>

@@ -1,0 +1,36 @@
+###Temperatura###
+<table border="1" align="center">
+  <tr>
+    <th>Temperatura</th>
+    <th>Equ. Patrón</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      7.3 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>0.0 °C</td>
+    <td>±0.7 °C + 1.5 error sonda</td>
+  </tr>
+  <tr>
+    <td>
+      19.2 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>19.2 °C</td>
+    <td>±0.7 °C + 1.5 error sonda</td>
+  </tr>
+  <tr>
+    <td>
+      105.5 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>105.2 °C</td>
+    <td>±0.7 °C + 1.5 error sonda</td>
+  </tr>
+  <tr>
+    <td>
+      150.0 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>150.0 °C</td>
+    <td>±0.7 °C + 1.5 error sonda</td>
+  </tr>
+</table>

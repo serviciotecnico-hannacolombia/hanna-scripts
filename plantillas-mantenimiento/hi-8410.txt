@@ -1,0 +1,55 @@
+###HI 8410###
+<table border="1" align="center">
+  <tr>
+    <th>HI 8410</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.0 % OD <b><font color="green">✔</font></b>
+    </td>
+    <td>0.0 % OD</td>
+    <td>±1.5 % F.S @25°C</td>
+  </tr>
+  <tr>
+    <td>
+      103 % OD <b><font color="green">✔</font></b>
+    </td>
+    <td>100.00 % OD</td>
+    <td>±1.5 % F.S @25°C</td>
+  </tr>
+  <tr>
+    <td>
+      402 % OD <b><font color="green">✔</font></b>
+    </td>
+    <td>400.00 % OD</td>
+    <td>±1.5 % F.S @25°C</td>
+  </tr>
+  <tr>
+    <td>
+      595 % OD <b><font color="green">✔</font></b>
+    </td>
+    <td>598.00 % OD</td>
+    <td>±1.5 % F.S @25°C</td>
+  </tr>
+  <tr>
+    <th>mA</th>
+    <th>Valores teóricos</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.99 V <b><font color="green">✔</font></b>
+    </td>
+    <td>4 mA @ 1 V (250Ω)</td>
+    <td>No aplica</td>
+  </tr>
+  <tr>
+    <td>
+      1.72 V <b><font color="green">✔</font></b>
+    </td>
+    <td>7 mA - 1.75 V (250Ω)</td>
+    <td>No aplica</td>
+  </tr>
+</table>

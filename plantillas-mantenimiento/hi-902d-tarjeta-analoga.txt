@@ -1,0 +1,29 @@
+###HI 902D###
+<table border="1" align="center">
+  <tr>
+    <th>HI 902D (Tarjeta analoga) </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.1 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>0 ±5 mV</td>
+    <td>±0.2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      1798.1 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>1800±5 mV</td>
+    <td>± ±0.2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -1799.4 mV  <b><font color="green">✔</font></b>
+    </td>
+    <td>-1800±5 mV</td>
+    <td>±0.2 mV</td>
+  </tr>
+</table>

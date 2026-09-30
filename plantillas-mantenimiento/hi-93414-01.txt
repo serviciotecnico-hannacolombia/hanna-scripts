@@ -1,0 +1,50 @@
+###HI 93414-01###
+<table border="1" align="center">
+  <tr>
+    <th>HI 93414-01</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.15 NTU <b><font color="green">✔</font></b>
+    </td>
+    <td>0.10 NTU @25°C</td>
+    <td>±2% o 0.02 NTU, lo que sea mayor</td>
+  </tr>
+  <tr>
+    <td>
+      15.3 NTU <b><font color="green">✔</font></b>
+    </td>
+    <td>15.0 NTU @25°C</td>
+    <td>±2% o 0.02 NTU, lo que sea mayor</td>
+  </tr>
+  <tr>
+    <td>
+      101 NTU <b><font color="green">✔</font></b>
+    </td>
+    <td>100 NTU @25°C</td>
+    <td>±2% o 0.02 NTU, lo que sea mayor</td>
+  </tr>
+  <tr>
+    <td>
+      748 NTU <b><font color="green">✔</font></b>
+    </td>
+    <td>750 NTU @25°C</td>
+    <td>±2% o 0.02 NTU, lo que sea mayor</td>
+  </tr>
+  <tr>
+    <td>
+      1.01 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>1.00 ± 0.03mg/L CL2 F @25°C</td>
+    <td>±0.03 mg/L ±3% de lectura</td>
+  </tr>
+  <tr>
+    <td>
+      1.00 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>1.00 ± 0.03mg/L CL2 T @25°C</td>
+    <td>±0.03 mg/L ±3% de lectura</td>
+  </tr>
+</table>

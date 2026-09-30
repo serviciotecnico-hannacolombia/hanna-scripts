@@ -1,0 +1,20 @@
+###HI 9564###
+<table border="1" align="center">
+  <tr>
+    <th> HI 9564 </th>
+    <th> Equipo o soluciones de referencia  </th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      94.7 % RH <b><font color="green">✔</font></b>
+    </td>
+    <td> 95.0 % RH </td>
+    <td> ±2.5 % RH </td>
+  </tr>
+   <tr>
+    <td>22.0 °C <b><font color="green">✔</font></b></td>
+    <td>22.2 °C</td>
+    <td>±0.7 °C</td>
+  </tr>
+</table>

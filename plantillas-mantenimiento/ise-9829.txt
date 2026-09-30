@@ -1,0 +1,22 @@
+###ISE 9829###
+<table border="1" align="center">
+  <tr>
+    <th>ISE 9829</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      10 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td>10.00 ppm @25°C</td>
+    <td>±5% de lectura o 2 ppm</td>
+  </tr>
+  <tr>
+    <td>
+      100 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td>100 ±0.05 ppm @25°C</td>
+    <td>±5% de lectura o 2 ppm</td>
+  </tr>
+</table>

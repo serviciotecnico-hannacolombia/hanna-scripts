@@ -1,0 +1,22 @@
+###HI 97106###
+<table border="1" align="center">
+  <tr>
+    <th> HI 97106 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.99 Abs <b><font color="green">✔</font></b>
+    </td>
+    <td> 1.00 ± 0.02 @420 </td>
+    <td> ±5 mg/L or ±4 % de lectura @25 °C </td>
+  </tr>
+  <tr>
+    <td>
+      1.00 Abs <b><font color="green">✔</font></b>
+    </td>
+    <td> 1.00 ± 0.02 @610 </td>
+    <td> ±15 mg/L or ±4 % de lectura @25 °C </td>
+  </tr>
+</table>

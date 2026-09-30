@@ -1,0 +1,32 @@
+###HI 4113###
+<table border="1" align="center">
+  <tr>
+    <th> HI 4113 </th>
+    <th>Equipo o soluciones de referencia </th>
+  </tr>
+  <tr>
+    <td>
+      62.8 mV <b><font color="green">✔</font></b>
+    </td>
+    <td> 1 ml de estandar (10 ppm)  </td>
+  </tr>
+  <tr>
+    <td>
+      62.8 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>10 ml de estándar(100 ppm)</td>
+    </tr>
+    <tr>
+    <th> Diferencia </th>
+    <th> Valor ideal </th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>-11.9 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>  -56 mV   </td>
+    <td>  ±4 mV </td>
+  </tr>
+</table>
+<b>Pendiente indicada en calibración ISE Cloruro</b>
+96.2 % ideal entre 80-110 %

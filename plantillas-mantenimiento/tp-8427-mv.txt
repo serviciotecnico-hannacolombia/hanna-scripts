@@ -1,0 +1,183 @@
+###TP 8427###
+<table border="1" align="center">
+  <tr>
+    <th>TP 8427</th>
+    <th>Equi. referencia</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.0 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>0.0 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      177.4 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>177.5 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      349.9 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>350 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      380.1 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>380 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      500.1 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>500 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      599.9 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>600 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      1000 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>1000 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      1077.2 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>1077.1 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      1499.8 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>1500 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      1800 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>1800 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      1900 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>1900 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      1999.8 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>2000 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      2050.2 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>2050 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -177.5 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-177.5 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -349.9 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-350 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -380.1 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-380 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -500.1 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-500 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -599.9 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-600 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -999.9 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-1000 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -1077.1 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-1077.1 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -1499.9 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-1500 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -1800.1 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-1800 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -1900 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-1900 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -1999.9 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-2000 mV</td>
+    <td>±5 mV</td>
+  </tr>
+  <tr>
+    <td>
+      -2050.1 mV <b><font color="green">✔</font></b>
+    </td>
+    <td>-2050 mV</td>
+    <td>±5 mV</td>
+  </tr>
+</table>

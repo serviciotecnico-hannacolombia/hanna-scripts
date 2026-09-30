@@ -1,0 +1,36 @@
+###TP 8427###
+<table border="1" align="center">
+  <tr>
+    <th>TP 8427</th>
+    <th>Equi. referencia</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      25.0 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>25.0 °C</td>
+    <td>±0.5 °C</td>
+  </tr>
+  <tr>
+    <td>
+      0.0 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>0.0 °C</td>
+    <td>±0.5 °C</td>
+  </tr>
+  <tr>
+    <td>
+      50.1 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>50.0 °C</td>
+    <td>±0.5 °C</td>
+  </tr>
+  <tr>
+    <td>
+      100.0 °C <b><font color="green">✔</font></b>
+    </td>
+    <td>100.0 °C</td>
+    <td>±0.5 °C</td>
+  </tr>
+</table>

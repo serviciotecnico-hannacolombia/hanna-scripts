@@ -1,0 +1,50 @@
+###HI 97101###
+<table border="1" align="center">
+  <tr>
+    <th> HI 97101C </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      6.9 pH <b><font color="green">✔</font></b>
+    </td>
+    <td>7.0 pH @25°C</td>
+    <td>±0.2 pH</td>
+  </tr>
+  <tr>
+    <td>
+      1.01 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>1.00 ± 0.03mg/L CL2 F @25°C</td>
+    <td>±0.03 mg/L ±3% de lectura</td>
+  </tr>
+  <tr>
+    <td>
+      20 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td> 20 ± 1  mg/L  T @25°C</td>
+    <td> 	± 1 mg / L ± 15% de lectura </td>
+  </tr>
+  <tr>
+    <td>
+     0.80 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td> 0.80 ± 0.07 mg/L  T @25°C</td>
+    <td> 	± 0.01 mg / L ± 8% o lectura </td>
+  </tr>
+  <tr>
+    <td>
+      2.01 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td> 2.01 ± 0.06 mg/L  T @25°C </td>
+    <td>  ± 0.08 mg / L ± 3% de lectura </td>
+  </tr>
+  <tr>
+    <td>
+      2.5 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>  2.5 ± 0.2 mg/L  T @25°C </td>
+    <td>  ± 0.1 mg / L ± 5% de lectura </td>
+  </tr>
+  </table>

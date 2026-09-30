@@ -1,0 +1,22 @@
+###HI 86301###
+<table border="1" align="center">
+  <tr>
+    <th>HI 86301</th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.0 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td>0.0 ppm @25°C</td>
+    <td>±2.0% F.S</td>
+  </tr>
+  <tr>
+    <td>
+      1385 ppm <b><font color="green">✔</font></b>
+    </td>
+    <td>1382 ±5 ppm @25°C</td>
+    <td>±2.0% F.S</td>
+  </tr>
+</table>

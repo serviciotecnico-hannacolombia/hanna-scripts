@@ -1,0 +1,64 @@
+###HI 903###
+<table border="1" align="center">
+  <tr>
+    <th>Tarjeta Análoga</th>
+    <th>Equipo de Referencia</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      15.1mV@1uA <b><font color="green">✔</font></b>
+    </td>
+    <td>15.0mV@1uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      29.8mV@2uA <b><font color="green">✔</font></b>
+    </td>
+    <td>29.8mV@2uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      75.0mV@5uA <b><font color="green">✔</font></b>
+    </td>
+    <td>74.9mV@5uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      149.0mV@10uA <b><font color="green">✔</font></b>
+    </td>
+    <td>148.9mV@10uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      223.7mV@15uA <b><font color="green">✔</font></b>
+    </td>
+    <td>223.5mV@15uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      300.1mV@20uA <b><font color="green">✔</font></b>
+    </td>
+    <td>300.3mV@20uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      449.7mV@30uA <b><font color="green">✔</font></b>
+    </td>
+    <td>449.6mV@30uA</td>
+    <td>±2 mV</td>
+  </tr>
+  <tr>
+    <td>
+      599.6mV@40uA <b><font color="green">✔</font></b>
+    </td>
+    <td>599.8mV@40uA</td>
+    <td>±2 mV</td>
+  </tr>
+</table>

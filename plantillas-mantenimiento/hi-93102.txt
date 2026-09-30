@@ -1,0 +1,36 @@
+###HI 93102###
+<table border="1" align="center">
+  <tr>
+    <th>HI 93102</th>
+    <th>Solución</th>
+    <th>Tolerancia Instrumento</th>
+  </tr>
+  <tr>
+    <td>
+      1.00 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>1.00 mg/L ±0.06</td>
+    <td>±0.05 mg/L</td>
+  </tr>
+  <tr>
+    <td>
+      0.50 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>0.50 mg/L ±0.05</td>
+    <td>±0.05 mg/L</td>
+  </tr>
+  <tr>
+    <td>
+      0.24 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>0.24 mg/L ±0.04</td>
+    <td>±0.05 mg/L</td>
+  </tr>
+  <tr>
+    <td>
+      0.01 mg/L <b><font color="green">✔</font></b>
+    </td>
+    <td>0.01 mg/L ±0.02</td>
+    <td>±0.05 mg/L</td>
+  </tr>
+</table>

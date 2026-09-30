@@ -1,0 +1,36 @@
+###HI 98703###
+<table border="1" align="center">
+  <tr>
+    <th>HI 98703 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.10 NTU <b><font color="green">✔</font></b>
+    </td>
+    <td>0.10 NTU @25°C</td>
+    <td>±2% o 0.02 NTU, lo que sea mayor</td>
+  </tr>
+  <tr>
+    <td>
+      15.0 NTU <b><font color="green">✔</font></b>
+    </td>
+    <td>15.0 NTU @25°C</td>
+    <td>±2% o 0.02 NTU, lo que sea mayor</td>
+  </tr>
+  <tr>
+    <td>
+      100 NTU <b><font color="green">✔</font></b>
+    </td>
+    <td>100 NTU @25°C</td>
+    <td>±2% o 0.02 NTU, lo que sea mayor</td>
+  </tr>
+  <tr>
+    <td>
+      750 NTU <b><font color="green">✔</font></b>
+    </td>
+    <td>750 NTU @25°C</td>
+    <td>±2% o 0.02 NTU, lo que sea mayor</td>
+  </tr>
+</table>

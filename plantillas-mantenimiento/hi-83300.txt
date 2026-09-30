@@ -1,0 +1,43 @@
+###HI 83300###
+<table border="1" align="center">
+  <tr>
+    <th> HI 83300 </th>
+    <th>Sol. Estándar</th>
+    <th>Tolerancia</th>
+  </tr>
+  <tr>
+    <td>
+      0.95 abs <b><font color="green">✔</font></b>
+    </td>
+    <td> 420nm 1.00 abs </td>
+    <td> ± 0.02 @25°C + 0.003 abs </td>
+  </tr>
+   <tr>
+    <td>
+      0.96 abs <b><font color="green">✔</font></b>
+    </td>
+    <td> 466nm 1.00 abs</td>
+    <td> ± 0.02 @25°C + 0.003 abs</td>
+  </tr>
+   <tr>
+    <td>
+     1.01 abs <b><font color="green">✔</font></b>
+    </td>
+    <td> 525nm 1.00 abs </td>
+    <td> ± 0.02 @25°C + 0.003 abs </td>
+  </tr>
+   <tr>
+    <td>
+      1.00 abs <b><font color="green">✔</font></b>
+    </td>
+    <td> 575nm 1.00 abs </td>
+    <td> ± 0.02 @25°C + 0.003 abs </td>
+  </tr>
+  <tr>
+    <td>
+      1.00 abs <b><font color="green">✔</font></b>
+    </td>
+    <td> 610nm 1.00 abs </td>
+    <td> ± 0.02 @25°C + 0.003 abs </td>
+  </tr>
+</table>

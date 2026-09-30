@@ -1,0 +1,36 @@
+###HI 97500###
+<table border="1" align="center">
+  <tr>
+    <th>HI 97500</th>
+    <th>Solución</th>
+    <th>Tolerancia Instrumento</th>
+  </tr>
+  <tr>
+    <td>
+      6.7 klux <b><font color="green">✔</font></b>
+    </td>
+    <td>6718 Lux ±6%</td>
+    <td>±6% de lectura ±2 dígitos</td>
+  </tr>
+  <tr>
+    <td>
+      2.050 klux <b><font color="green">✔</font></b>
+    </td>
+    <td>2020 Lux ±6%</td>
+    <td>±6% de lectura ±2 dígitos</td>
+  </tr>
+  <tr>
+    <td>
+      0.685 klux <b><font color="green">✔</font></b>
+    </td>
+    <td>685 Lux ±6%</td>
+    <td>±6% de lectura ±2 dígitos</td>
+  </tr>
+  <tr>
+    <td>
+      0.520 klux <b><font color="green">✔</font></b>
+    </td>
+    <td>540 Lux ±6%</td>
+    <td>±6% de lectura ±2 dígitos</td>
+  </tr>
+</table>
