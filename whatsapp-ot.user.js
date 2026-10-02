@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         WhatsApp desde Teléfono OT - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.3.0
-// @description  Detecta uno o varios teléfonos celulares en el bloque "Contacto" de la OT y muestra un botón de WhatsApp por cada uno con un mensaje predeterminado (incluye el primer nombre del contacto, el número de OT y tu nombre configurado), o un aviso "Teléfono no válido" si no se puede determinar ninguno. Incluye botón ⚙️ para configurar tu nombre.
+// @version      1.4.0
+// @description  Detecta uno o varios teléfonos celulares en el bloque "Contacto" de la OT y muestra un botón de WhatsApp por cada uno con un mensaje predeterminado (saludo según la hora, primer nombre del contacto, número de OT, tu nombre configurado y el link de seguimiento de "URI Externa"), o un aviso "Teléfono no válido" si no se puede determinar ninguno. Incluye botón ⚙️ para configurar tu nombre.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
 // @grant        none
@@ -129,6 +129,36 @@
   }
 
   // ─────────────────────────────────────────────
+  // 3b. OBTENER EL LINK DE SEGUIMIENTO ("URI Externa" / "Ver en App Externa")
+  // Es el mismo link que aparece en el detalle de la OT, bajo la fila
+  // "URI Externa" (el sitio la escribe a veces como "URl Externa", con "l"
+  // minúscula en vez de "I" — se contemplan ambas variantes).
+  // ─────────────────────────────────────────────
+  function getLinkSeguimiento() {
+    try {
+      // Camino directo: el <a> con el texto del botón tal cual se ve en pantalla.
+      for (const a of document.querySelectorAll('a[href]')) {
+        if (/ver en app externa/i.test((a.textContent || '').trim())) {
+          return a.href;
+        }
+      }
+      // Alternativa: localizar la celda/etiqueta "URI/URL Externa" y tomar
+      // el <a> dentro del bloque siguiente (estructura de tabla key/value).
+      for (const el of document.querySelectorAll('td, div, span, th')) {
+        const text = (el.textContent || '').trim();
+        if (/^UR[IL]\s*Externa$/i.test(text)) {
+          const sib = el.nextElementSibling;
+          const a = sib ? sib.querySelector('a[href]') : null;
+          if (a) return a.href;
+        }
+      }
+    } catch (e) {
+      console.warn('[OT WhatsApp] Error buscando el link de seguimiento:', e);
+    }
+    return null;
+  }
+
+  // ─────────────────────────────────────────────
   // 4. NORMALIZAR NOMBRE: solo el primer nombre,
   // primera letra mayúscula y el resto minúscula.
   // Si no es un nombre real (vacío, guiones, números,
@@ -157,19 +187,38 @@
   }
 
   // ─────────────────────────────────────────────
+  // 4b. SALUDO SEGÚN LA HORA DEL DÍA (hora local del navegador de quien
+  // escribe, es decir, del técnico — no la del cliente).
+  //  - 05:00 a 11:59 -> "buenos días"
+  //  - 12:00 a 18:59 -> "buenas tardes"
+  //  - 19:00 a 04:59 -> "buenas noches"
+  // ─────────────────────────────────────────────
+  function getSaludo() {
+    const hora = new Date().getHours();
+    if (hora >= 5 && hora < 12) return 'buenos días';
+    if (hora >= 12 && hora < 19) return 'buenas tardes';
+    return 'buenas noches';
+  }
+
+  // ─────────────────────────────────────────────
   // 5. CONSTRUIR MENSAJE PREDETERMINADO
   // ─────────────────────────────────────────────
-  function buildMensaje(nombre, orderId) {
+  function buildMensaje(nombre, orderId, linkSeguimiento) {
     const otTexto = orderId ? `OTST ${orderId}` : 'OTST';
     const nombreTecnico = getNombreTecnico();
+    const saludo = getSaludo();
     const presentacion = nombreTecnico
       ? `hablas con ${nombreTecnico} del Servicio Técnico de Hanna Instruments.`
       : 'hablas con el Servicio Técnico de Hanna Instruments.';
 
+    const seguimiento = linkSeguimiento
+      ? ` Puedes hacer seguimiento a tu equipo aquí: ${linkSeguimiento}`
+      : '';
+
     if (nombre) {
-      return `Hola muy buen día, ${nombre}, ¿Cómo estas? ${presentacion} Te escribo al respecto del equipo que nos enviaste para revisión (${otTexto})`;
+      return `Hola ${nombre}, ${saludo}, ¿Cómo estas? ${presentacion} Te escribo al respecto del equipo que nos enviaste para revisión (${otTexto}).${seguimiento}`;
     }
-    return `Hola muy buen día, ¿Cómo estas? ${presentacion} Te escribo al respecto del equipo que nos enviaste para revisión (${otTexto})`;
+    return `Hola, ${saludo}, ¿Cómo estas? ${presentacion} Te escribo al respecto del equipo que nos enviaste para revisión (${otTexto}).${seguimiento}`;
   }
 
   // ─────────────────────────────────────────────
@@ -396,11 +445,13 @@
       const orderId = getOrderId();
       const nombreRaw = getContactNameRaw();
       const nombre = normalizarPrimerNombre(nombreRaw);
-      const mensaje = buildMensaje(nombre, orderId);
+      const linkSeguimiento = getLinkSeguimiento();
+      const mensaje = buildMensaje(nombre, orderId, linkSeguimiento);
 
       console.log('[OT WhatsApp] Texto crudo teléfono:', rawTelefono);
       console.log('[OT WhatsApp] Resultado parseo teléfono:', parsed);
       console.log('[OT WhatsApp] Nombre crudo:', nombreRaw, '-> normalizado:', nombre);
+      console.log('[OT WhatsApp] Link de seguimiento:', linkSeguimiento);
       console.log('[OT WhatsApp] Mensaje:', mensaje);
 
       injectStyles();
