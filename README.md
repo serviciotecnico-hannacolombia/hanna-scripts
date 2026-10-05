@@ -15,6 +15,7 @@ Instala solo los que uses — cada uno vive en su propia página de la intranet 
 | **WhatsApp Pre-Ingreso** | `.../stecnico/pre_ingreso/item/*` | Detecta el/los celular(es) del contacto y muestra botones de WhatsApp con un mensaje predeterminado. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/whatsapp-preingreso.user.js) |
 | **WhatsApp OT** | `.../stecnico/item/*` | Igual que el anterior pero para la página de la OT. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/whatsapp-ot.user.js) |
 | **Lineamientos del Cliente** | `.../stecnico/item/N` (solo "Ver Detalle") | Detecta el NIT del cliente y muestra sus lineamientos especiales (por categoría) debajo de la tarjeta de Estado, leídos desde Google Sheets. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/lineamientos-cliente.user.js) |
+| **Autocompletar Cotización SGV** | `.../sgv/ingresos/cotizaciones/crear` | Llena Fecha Primer Seguimiento (+2 días hábiles) y Fecha Cierre (+2 meses, ajustada a día hábil), agrega el comentario de la OTST relacionada si aplica, y completa "Información de Aplicación" con un texto por defecto. Solo llena campos vacíos. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/cotizacion-sgv.user.js) |
 
 ## Instalación (una sola vez, por persona, por cada script)
 
