@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Guardar Contacto en Google Contacts - OT Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.3.0
+// @version      1.3.1
 // @description  En el detalle de una OT resalta el teléfono del contacto; al hacer clic sobre él (tooltip "Crear contacto") abre un cuadro de confirmación editable (nombre, apellidos, empresa, correo y teléfonos; nombre/apellidos/empresa en MAYÚSCULAS) y, al aceptar, guarda el contacto en Google Contacts con la etiqueta "Client" y una foto aleatoria, usando un Google Apps Script propio. No duplica contactos que ya existen.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
@@ -23,7 +23,6 @@
     // URL de la aplicación web del Apps Script (ya precargada). Solo falta la
     // clave, que se pide la primera vez y queda guardada en tu navegador.
     urlDefault: 'https://script.google.com/macros/s/AKfycbxq_rypjvWVOWdn36hgu-5TxVNFynfOQ8b7wE1LkwDWadQNP9wXWyDhbk1FZRFgz6BocA/exec',
-    paisDefault: '57', // Colombia
     claveUrl: 'hanna_contactos_url',
     claveSecreta: 'hanna_contactos_clave',
     claseTel: 'ot-ct-tel',
@@ -126,9 +125,9 @@
 
   const REGEX_CELULAR = /(\+?57[\s.\-]?)?3(?:[\s.\-]?\d){9}/g;
 
-  // Devuelve los celulares colombianos del texto como "+573001234567".
-  // Si no hay ninguno (fijo, extensión, formato raro), devuelve el texto
-  // tal cual para no perder el dato.
+  // Devuelve los celulares colombianos del texto SIN el +57, como
+  // "300 1234567" (10 dígitos). Si no hay ninguno (fijo, extensión, formato
+  // raro), devuelve el texto tal cual para no perder el dato.
   function parseTelefonos(raw) {
     if (!raw) return [];
     const matches = raw.match(REGEX_CELULAR) || [];
@@ -136,11 +135,11 @@
     const salida = [];
     for (const m of matches) {
       let d = m.replace(/\D/g, '');
-      if (/^3\d{9}$/.test(d)) d = CONFIG.paisDefault + d;
-      else if (!/^573\d{9}$/.test(d)) continue;
+      if (/^573\d{9}$/.test(d)) d = d.slice(2); // quita el 57 si venía
+      else if (!/^3\d{9}$/.test(d)) continue;
       if (!vistos.has(d)) {
         vistos.add(d);
-        salida.push('+' + d);
+        salida.push(d.slice(0, 3) + ' ' + d.slice(3));
       }
     }
     if (salida.length === 0) {
@@ -327,7 +326,7 @@
           <input type="text" data-campo="correo" autocomplete="off">
           <label>Teléfonos</label>
           <textarea rows="2" data-campo="telefonos"></textarea>
-          <div class="ot-ct-ayuda">Uno por línea. Los celulares colombianos se guardan con +57.</div>
+          <div class="ot-ct-ayuda">Uno por línea. Los celulares se guardan sin +57 (10 dígitos).</div>
           <div class="ot-ct-error"></div>
           <div class="ot-ct-botones">
             <button type="button" class="ot-ct-cancelar">Cancelar</button>

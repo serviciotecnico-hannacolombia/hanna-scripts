@@ -401,7 +401,7 @@ En el detalle de la OT el teléfono del contacto aparece **resaltado en amarillo
 |---|---|
 | Nombre | Contacto |
 | Apellidos y Empresa | Cliente |
-| Correo / Teléfono | E-mail / Teléfono del contacto (celulares con prefijo +57) |
+| Correo / Teléfono | E-mail / Teléfono del contacto (celulares sin el +57, a 10 dígitos) |
 | Etiqueta | `Client` (si no existe, se crea) |
 | Foto | Imagen aleatoria de Picsum |
 
