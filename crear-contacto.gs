@@ -36,15 +36,31 @@ function doGet() {
 }
 
 function doPost(e) {
+  var datos;
+  try {
+    datos = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+  } catch (err) {
+    return respuestaJson_({ ok: false, error: 'Solicitud inválida' });
+  }
+
+  var claveEsperada = PropertiesService.getScriptProperties().getProperty('CLAVE');
+  if (!claveEsperada || datos.clave !== claveEsperada) {
+    return respuestaJson_({ ok: false, error: 'Clave incorrecta' });
+  }
+
+  // Consulta (solo lectura): ¿ya existe este contacto? No necesita bloqueo.
+  if (datos.accion === 'consultar') {
+    try {
+      return respuestaJson_(consultarContacto_(datos));
+    } catch (err) {
+      return respuestaJson_({ ok: false, error: String(err) });
+    }
+  }
+
+  // Creación
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(20000); // evita duplicados si se hace doble clic
-    var datos = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-
-    var claveEsperada = PropertiesService.getScriptProperties().getProperty('CLAVE');
-    if (!claveEsperada || datos.clave !== claveEsperada) {
-      return respuestaJson_({ ok: false, error: 'Clave incorrecta' });
-    }
     return respuestaJson_(crearContacto_(datos));
   } catch (err) {
     return respuestaJson_({ ok: false, error: String(err) });
@@ -112,6 +128,15 @@ function crearContacto_(datos) {
   }
 
   return { ok: true, estado: 'creado', nombre: nombre, etiqueta: etiquetaOk, foto: fotoOk };
+}
+
+// Solo consulta: devuelve si ya hay un contacto con ese correo o teléfono
+function consultarContacto_(datos) {
+  var correo = limpiar_(datos.correo).toLowerCase();
+  var telefonos = (datos.telefonos || []).map(limpiar_).filter(Boolean);
+  if (!correo && telefonos.length === 0) return { ok: true, existe: false };
+  var p = buscarExistente_(correo, telefonos);
+  return { ok: true, existe: !!p, nombre: p ? nombreDe_(p) : '' };
 }
 
 // ─────────────────────────────────────────────

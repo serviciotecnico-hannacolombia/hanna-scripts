@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Guardar Contacto en Google Contacts - OT Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.3.1
-// @description  En el detalle de una OT resalta el teléfono del contacto; al hacer clic sobre él (tooltip "Crear contacto") abre un cuadro de confirmación editable (nombre, apellidos, empresa, correo y teléfonos; nombre/apellidos/empresa en MAYÚSCULAS) y, al aceptar, guarda el contacto en Google Contacts con la etiqueta "Client" y una foto aleatoria, usando un Google Apps Script propio. No duplica contactos que ya existen.
+// @version      1.4.0
+// @description  En el detalle de una OT resalta el teléfono del contacto; al hacer clic sobre él (tooltip "Crear contacto") abre un cuadro de confirmación editable (nombre, apellidos, empresa, correo y teléfonos; nombre/apellidos/empresa en MAYÚSCULAS) y, al aceptar, guarda el contacto en Google Contacts con la etiqueta "Client" y una foto aleatoria, usando un Google Apps Script propio. El número se ve en amarillo si el contacto aún no está guardado y en verde si ya existe en tus contactos. No duplica contactos que ya existen.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
 // @grant        GM_xmlhttpRequest
@@ -188,6 +188,53 @@
   }
 
   // ─────────────────────────────────────────────
+  // 3b. MEMORIA LOCAL DE CONTACTOS RECIÉN CREADOS
+  // La búsqueda de Google tarda un rato en ver los contactos nuevos. Para
+  // que el número se vea verde de inmediato después de crearlo, se recuerda
+  // unos minutos (solo en este navegador) por teléfono (10 dígitos) y correo.
+  // ─────────────────────────────────────────────
+  const CLAVE_RECIENTES = 'hanna_contactos_recientes';
+  const TTL_RECIENTES_MS = 10 * 60 * 1000;
+
+  function llavesDe(datos) {
+    const llaves = [];
+    (datos.telefonos || []).forEach((t) => {
+      const d = String(t).replace(/\D/g, '');
+      if (d) llaves.push('t:' + (d.length > 10 ? d.slice(-10) : d));
+    });
+    if (datos.correo) llaves.push('c:' + datos.correo.trim().toLowerCase());
+    return llaves;
+  }
+
+  function leerRecientes() {
+    try {
+      const obj = JSON.parse(GM_getValue(CLAVE_RECIENTES, '{}') || '{}');
+      const ahora = Date.now();
+      Object.keys(obj).forEach((k) => { if (ahora - obj[k] > TTL_RECIENTES_MS) delete obj[k]; });
+      return obj;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function recordarCreado(datos) {
+    const obj = leerRecientes();
+    const ahora = Date.now();
+    llavesDe(datos).forEach((k) => { obj[k] = ahora; });
+    try { GM_setValue(CLAVE_RECIENTES, JSON.stringify(obj)); } catch (e) {}
+  }
+
+  function fueCreadoReciente(datos) {
+    const obj = leerRecientes();
+    return llavesDe(datos).some((k) => k in obj);
+  }
+
+  // Pregunta al Apps Script si ya existe un contacto con estos datos
+  function consultarExistente(datos, cfg) {
+    return enviar(Object.assign({ accion: 'consultar' }, datos), cfg);
+  }
+
+  // ─────────────────────────────────────────────
   // 4. RESALTAR EL TELÉFONO DETECTADO EN LA PÁGINA
   // Envuelve el número dentro de la celda "Contacto" en un <span> resaltado
   // y clicable. Si no hay teléfono, usa el correo como respaldo para que
@@ -205,7 +252,6 @@
       .${CONFIG.claseTel}:hover { background: #ffe066; }
       .${CONFIG.claseTel}.guardando { opacity: .6; cursor: wait; }
       .${CONFIG.claseTel}.ok { background: #c9f0d1; border-bottom-color: #1e8e3e; }
-      .${CONFIG.claseTel}.existe { background: #ffe0b3; border-bottom-color: #f29900; }
       .${CONFIG.claseTel}.error { background: #f9c9c5; border-bottom-color: #d93025; }
       .${CONFIG.claseEstado} { margin-left: 6px; font-size: 12px; color: #444; }
       .ot-ct-overlay {
@@ -407,15 +453,40 @@
     estadoEl.className = CONFIG.claseEstado;
     ultimo.insertAdjacentElement('afterend', estadoEl);
 
-    function marcar(clase, texto) {
+    let ocupado = false;
+
+    function marcar(clase, texto, tooltip) {
       spans.forEach((sp) => {
-        sp.classList.remove('guardando', 'ok', 'existe', 'error');
+        sp.classList.remove('guardando', 'ok', 'error');
         if (clase) sp.classList.add(clase);
+        sp.title = tooltip || 'Crear contacto';
       });
       estadoEl.textContent = texto || '';
     }
 
-    let ocupado = false;
+    // Al abrir la OT: verde si el contacto ya existe, amarillo si no
+    async function verificarAlCargar() {
+      const datos = leerDatos();
+      if (!datos || (!datos.correo && datos.telefonos.length === 0)) return;
+
+      if (fueCreadoReciente(datos)) {
+        marcar('ok', '✓ Guardado', 'Ya guardado en tus contactos');
+        return;
+      }
+
+      const cfg = getConfig();
+      if (!cfg.clave) return; // sin clave todavía: se queda amarillo
+      try {
+        const r = await consultarExistente(datos, cfg);
+        if (spans[0].classList.contains('guardando')) return; // se está guardando ahora mismo: no pisar su estado
+        if (r && r.ok && r.existe) {
+          marcar('ok', '✓ Guardado', 'Ya guardado: ' + (r.nombre || 'contacto existente'));
+        }
+      } catch (e) {
+        console.warn('[Contactos] No se pudo verificar si el contacto ya existe:', e.message);
+      }
+    }
+
     async function crear() {
       if (ocupado) return;
 
@@ -443,15 +514,18 @@
         if (!r.ok) {
           marcar('error', 'Error: ' + (r.error || 'desconocido'));
         } else if (r.estado === 'existente') {
-          marcar('existe', 'Ya existía en tus contactos: ' + r.nombre);
+          recordarCreado(datos);
+          marcar('ok', 'Ya existía en tus contactos: ' + r.nombre, 'Ya guardado: ' + r.nombre);
         } else {
+          recordarCreado(datos);
           const faltas = [];
           if (r.etiqueta === false) faltas.push('la etiqueta');
           if (r.foto === false) faltas.push('la foto');
           marcar(
             'ok',
             'Guardado: ' + datos.nombre +
-              (faltas.length ? ' (no se pudo poner ' + faltas.join(' ni ') + ')' : '')
+              (faltas.length ? ' (no se pudo poner ' + faltas.join(' ni ') + ')' : ''),
+            'Ya guardado: ' + datos.nombre
           );
         }
       } catch (e) {
@@ -462,6 +536,7 @@
     }
 
     spans.forEach((sp) => sp.addEventListener('click', crear));
+    verificarAlCargar();
   }
 
   function init() {
