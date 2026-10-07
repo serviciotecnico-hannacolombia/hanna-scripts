@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Guardar Contacto en Google Contacts - OT Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.4.0
+// @version      1.4.1
 // @description  En el detalle de una OT resalta el teléfono del contacto; al hacer clic sobre él (tooltip "Crear contacto") abre un cuadro de confirmación editable (nombre, apellidos, empresa, correo y teléfonos; nombre/apellidos/empresa en MAYÚSCULAS) y, al aceptar, guarda el contacto en Google Contacts con la etiqueta "Client" y una foto aleatoria, usando un Google Apps Script propio. El número se ve en amarillo si el contacto aún no está guardado y en verde si ya existe en tus contactos. No duplica contactos que ya existen.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
@@ -464,6 +464,14 @@
       estadoEl.textContent = texto || '';
     }
 
+    function avisarSinVerificar(motivo) {
+      spans.forEach((sp) => {
+        if (!sp.classList.contains('ok') && !sp.classList.contains('guardando')) {
+          sp.title = 'Crear contacto (no se pudo verificar si ya existe: ' + motivo + ')';
+        }
+      });
+    }
+
     // Al abrir la OT: verde si el contacto ya existe, amarillo si no
     async function verificarAlCargar() {
       const datos = leerDatos();
@@ -478,12 +486,17 @@
       if (!cfg.clave) return; // sin clave todavía: se queda amarillo
       try {
         const r = await consultarExistente(datos, cfg);
+        console.log('[Contactos] Respuesta de la consulta:', r);
         if (spans[0].classList.contains('guardando')) return; // se está guardando ahora mismo: no pisar su estado
         if (r && r.ok && r.existe) {
           marcar('ok', '✓ Guardado', 'Ya guardado: ' + (r.nombre || 'contacto existente'));
+        } else if (!r || !r.ok) {
+          // No se pudo verificar (p. ej. Apps Script sin actualizar): se explica en el tooltip
+          avisarSinVerificar((r && r.error) || 'respuesta inesperada');
         }
       } catch (e) {
         console.warn('[Contactos] No se pudo verificar si el contacto ya existe:', e.message);
+        avisarSinVerificar(e.message);
       }
     }
 

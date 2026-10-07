@@ -27,12 +27,13 @@
  */
 
 var ETIQUETA_CONTACTOS = 'Client';
+var VERSION = '1.5'; // si abres la URL /exec en el navegador debe mostrar esta versión
 
 // ─────────────────────────────────────────────
 // Puntos de entrada
 // ─────────────────────────────────────────────
 function doGet() {
-  return respuestaJson_({ ok: true, mensaje: 'Servicio de contactos activo' });
+  return respuestaJson_({ ok: true, mensaje: 'Servicio de contactos activo', version: VERSION });
 }
 
 function doPost(e) {
@@ -160,46 +161,35 @@ function nombreDe_(persona) {
   return (persona.names && persona.names[0] && persona.names[0].displayName) || 'Contacto sin nombre';
 }
 
+// Busca comparando directamente contra la lista de contactos (no contra el
+// índice de búsqueda de Google, que solo calza por prefijos y se actualiza
+// con retraso). Compara el correo en minúsculas y los teléfonos por sus
+// últimos 10 dígitos, sin importar espacios, guiones ni +57.
 function buscarExistente_(correo, telefonos) {
-  // searchContacts usa un caché: Google pide una primera llamada vacía
-  // para "calentarlo". Si falla, se sigue igual.
-  try {
-    People.People.searchContacts({ query: '', readMask: 'names' });
-  } catch (e) {}
-
-  var consultas = [];
-  if (correo) consultas.push(correo);
-  telefonos.forEach(function (t) {
-    var d = ultimos10_(t);
-    if (d) consultas.push(d);
-  });
-
   var telsBuscados = telefonos.map(ultimos10_).filter(Boolean);
+  if (!correo && telsBuscados.length === 0) return null;
 
-  for (var i = 0; i < consultas.length; i++) {
-    var resp;
-    try {
-      resp = People.People.searchContacts({
-        query: consultas[i],
-        readMask: 'names,emailAddresses,phoneNumbers',
-        pageSize: 10
-      });
-    } catch (e) {
-      Logger.log('Búsqueda falló (' + consultas[i] + '): ' + e);
-      continue;
-    }
-    var resultados = (resp && resp.results) || [];
-    for (var j = 0; j < resultados.length; j++) {
-      var p = resultados[j].person || {};
+  var pageToken = null;
+  do {
+    var resp = People.People.Connections.list('people/me', {
+      pageSize: 1000,
+      personFields: 'names,emailAddresses,phoneNumbers',
+      pageToken: pageToken || undefined
+    });
+    var personas = (resp && resp.connections) || [];
+    for (var i = 0; i < personas.length; i++) {
+      var p = personas[i];
       var coincideCorreo = correo && (p.emailAddresses || []).some(function (m) {
         return limpiar_(m.value).toLowerCase() === correo;
       });
       var coincideTel = telsBuscados.length && (p.phoneNumbers || []).some(function (t) {
-        return telsBuscados.indexOf(ultimos10_(t.value)) !== -1;
+        var d = ultimos10_(t.value);
+        return d && telsBuscados.indexOf(d) !== -1;
       });
       if (coincideCorreo || coincideTel) return p;
     }
-  }
+    pageToken = resp && resp.nextPageToken;
+  } while (pageToken);
   return null;
 }
 

@@ -421,6 +421,11 @@ Cada técnico crea su propio Apps Script para que los contactos queden en **su**
 
 Si cambias el código del Apps Script: **Implementar → Administrar implementaciones → editar → Versión nueva** (la URL no cambia).
 
+**Si el número no se pone verde aunque el contacto exista:**
+1. Abre la URL `/exec` en el navegador: debe mostrar `"version":"1.5"` (o mayor). Si no muestra versión, el Apps Script está desactualizado: pega el `.gs` nuevo y publica una **versión nueva**.
+2. Pasa el mouse sobre el número amarillo: si dice *"no se pudo verificar…"*, ahí aparece el motivo. También queda en la consola (F12) como `[Contactos] Respuesta de la consulta`.
+3. La detección compara el correo y los últimos 10 dígitos del teléfono contra tu lista de contactos (no importan espacios, guiones ni +57). Un contacto recién creado en Google puede tardar unos minutos en verse.
+
 ## Cuando hagas un cambio
 
 1. Edita el archivo `.user.js` del script que quieras cambiar.
