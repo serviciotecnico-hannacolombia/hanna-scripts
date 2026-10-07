@@ -16,7 +16,7 @@ Instala solo los que uses — cada uno vive en su propia página de la intranet 
 | **WhatsApp OT** | `.../stecnico/item/*` | Igual que el anterior pero para la página de la OT. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/whatsapp-ot.user.js) |
 | **Lineamientos del Cliente** | `.../stecnico/item/N` (solo "Ver Detalle") | Detecta el NIT del cliente y muestra sus lineamientos especiales (por categoría) debajo de la tarjeta de Estado, leídos desde Google Sheets. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/lineamientos-cliente.user.js) |
 | **Autocompletar Cotización SGV** | `.../sgv/ingresos/cotizaciones/crear` | Llena Fecha Primer Seguimiento (+2 días hábiles) y Fecha Cierre (+2 meses, ajustada a día hábil), agrega el comentario de la OTST relacionada si aplica, y completa "Información de Aplicación" con un texto por defecto. Solo llena campos vacíos. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/cotizacion-sgv.user.js) |
-| **Guardar Contacto en Google Contacts** | `.../stecnico/item/N` (solo detalle de la OT) | Resalta el teléfono del contacto en la OT; al hacer clic ("Crear contacto") lo guarda en Google Contacts con etiqueta "Client" y foto aleatoria, sin duplicar. Nombre, apellido y empresa siempre en MAYÚSCULAS. Requiere un Apps Script propio (ver sección abajo). | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/contactos-google.user.js) |
+| **Guardar Contacto en Google Contacts** | `.../stecnico/item/N` (solo detalle de la OT) | Resalta el teléfono del contacto en la OT; al hacer clic ("Crear contacto") abre un cuadro de confirmación editable y, al aceptar, lo guarda en Google Contacts con etiqueta "Client" y foto aleatoria, sin duplicar. Nombre, apellido y empresa siempre en MAYÚSCULAS. Requiere un Apps Script propio (ver sección abajo). | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/contactos-google.user.js) |
 
 ## Instalación (una sola vez, por persona, por cada script)
 
@@ -395,7 +395,7 @@ Esto es puramente visual (solo cambia lo que se ve en el navegador de quien teng
 
 ## Guardar Contacto en Google Contacts (Apps Script + userscript)
 
-En el detalle de la OT el teléfono del contacto aparece **resaltado en amarillo**; al pasar el mouse dice "Crear contacto" y al hacer clic crea el contacto en **tu** Google Contacts (si no hay teléfono, resalta el correo). Si hay varios números, cualquiera de ellos crea el mismo contacto con todos los números. Debajo del número aparece el resultado (verde = guardado, naranja = ya existía, rojo = error). Nombre, apellido y empresa se guardan siempre en **MAYÚSCULAS**:
+En el detalle de la OT el teléfono del contacto aparece **resaltado en amarillo**; al pasar el mouse dice "Crear contacto" y al hacer clic abre un **cuadro de confirmación** con Nombre, Apellidos, Empresa, Correo y Teléfonos (uno por línea) ya llenos pero editables: puedes corregir el nombre, quitar un apellido, etc. Con **Aceptar** (o Enter) se crea el contacto en **tu** Google Contacts; con **Cancelar** (o Esc) no se envía nada (si no hay teléfono, resalta el correo). Si hay varios números, cualquiera de ellos crea el mismo contacto con todos los números. Debajo del número aparece el resultado (verde = guardado, naranja = ya existía, rojo = error). Nombre, apellido y empresa se guardan siempre en **MAYÚSCULAS**:
 
 | Google Contacts | Sale de la OT |
 |---|---|
@@ -417,7 +417,7 @@ Cada técnico crea su propio Apps Script para que los contactos queden en **su**
 2. En el menú izquierdo: **Servicios (+)** → **People API** → **Agregar**.
 3. **Configuración del proyecto** (engranaje) → **Propiedades del script** → agrega `CLAVE` con una clave secreta larga que te inventes. Sin esa clave nadie más puede crear contactos con tu URL.
 4. **Implementar** → **Nueva implementación** → tipo **Aplicación web**: *Ejecutar como:* **Yo**, *Quién tiene acceso:* **Cualquier usuario**. Autoriza los permisos cuando Google lo pida y copia la URL que termina en `/exec`.
-5. Instala `contactos-google.user.js` en Tampermonkey. Al primer clic en el número pide la URL y la clave (se guardan solo en tu navegador, no en el repo). Para cambiarlas después: icono de Tampermonkey → *Configurar contactos de Google*.
+5. Pega la URL `/exec` en la constante `urlDefault` al inicio de `contactos-google.user.js` (cada técnico usa la de su propio Apps Script). Instala el script en Tampermonkey: al primer clic en el número solo pide la **clave** (se guarda en tu navegador, no en el repo). Para cambiar URL o clave después: icono de Tampermonkey → *Configurar contactos de Google*.
 
 Si cambias el código del Apps Script: **Implementar → Administrar implementaciones → editar → Versión nueva** (la URL no cambia).
 

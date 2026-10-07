@@ -4,7 +4,7 @@
  * Se publica como "Aplicación web" y lo llama el userscript
  * "contactos-google.user.js". Cada contacto se crea con:
  *   - Nombre    = nombre del contacto de la OT
- *   - Apellidos = nombre del cliente (empresa)
+ *   - Apellidos = por defecto el nombre del cliente (editable antes de enviar)
  *   - Empresa   = nombre del cliente
  *   - Correo y teléfono(s)
  *   - Etiqueta  = "Client"
@@ -65,6 +65,9 @@ function crearContacto_(datos) {
   // Regla general: nombre, apellido y empresa siempre en MAYÚSCULAS
   var nombre = limpiar_(datos.nombre).toLocaleUpperCase('es-CO');
   var empresa = limpiar_(datos.empresa).toLocaleUpperCase('es-CO');
+  // Apellidos: si el userscript los manda (aunque sea vacíos) se respetan tal
+  // cual; si no vienen (versión anterior del userscript) se usa la empresa.
+  var apellidos = (datos.apellidos === undefined ? empresa : limpiar_(datos.apellidos).toLocaleUpperCase('es-CO'));
   var correo = limpiar_(datos.correo).toLowerCase();
   var telefonos = (datos.telefonos || []).map(limpiar_).filter(Boolean);
 
@@ -81,10 +84,8 @@ function crearContacto_(datos) {
 
   // 2) Crear
   var persona = { names: [{ givenName: nombre }] };
-  if (empresa) {
-    persona.names[0].familyName = empresa;
-    persona.organizations = [{ name: empresa }];
-  }
+  if (apellidos) persona.names[0].familyName = apellidos;
+  if (empresa) persona.organizations = [{ name: empresa }];
   if (correo) persona.emailAddresses = [{ value: correo }];
   if (telefonos.length) {
     persona.phoneNumbers = telefonos.map(function (t) { return { value: t }; });

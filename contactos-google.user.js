@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Guardar Contacto en Google Contacts - OT Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.1.0
-// @description  En el detalle de una OT resalta el teléfono del contacto; al hacer clic sobre él (tooltip "Crear contacto") guarda el contacto (nombre, empresa, correo y teléfono, con nombre/apellido/empresa en MAYÚSCULAS) en Google Contacts con la etiqueta "Client" y una foto aleatoria, usando un Google Apps Script propio. No duplica contactos que ya existen.
+// @version      1.3.0
+// @description  En el detalle de una OT resalta el teléfono del contacto; al hacer clic sobre él (tooltip "Crear contacto") abre un cuadro de confirmación editable (nombre, apellidos, empresa, correo y teléfonos; nombre/apellidos/empresa en MAYÚSCULAS) y, al aceptar, guarda el contacto en Google Contacts con la etiqueta "Client" y una foto aleatoria, usando un Google Apps Script propio. No duplica contactos que ya existen.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
 // @grant        GM_xmlhttpRequest
@@ -20,6 +20,9 @@
   'use strict';
 
   const CONFIG = {
+    // URL de la aplicación web del Apps Script (ya precargada). Solo falta la
+    // clave, que se pide la primera vez y queda guardada en tu navegador.
+    urlDefault: 'https://script.google.com/macros/s/AKfycbxq_rypjvWVOWdn36hgu-5TxVNFynfOQ8b7wE1LkwDWadQNP9wXWyDhbk1FZRFgz6BocA/exec',
     paisDefault: '57', // Colombia
     claveUrl: 'hanna_contactos_url',
     claveSecreta: 'hanna_contactos_clave',
@@ -41,11 +44,24 @@
   // ─────────────────────────────────────────────
   function getConfig() {
     return {
-      url: (GM_getValue(CONFIG.claveUrl, '') || '').trim(),
+      // Si nunca configuraste otra URL, se usa la precargada
+      url: (GM_getValue(CONFIG.claveUrl, '') || '').trim() || CONFIG.urlDefault,
       clave: (GM_getValue(CONFIG.claveSecreta, '') || '').trim(),
     };
   }
 
+  // Pide solo la clave (primer uso). La URL ya viene precargada.
+  function pedirClave() {
+    const clave = window.prompt(
+      'Escribe la clave secreta (la misma que pusiste en CLAVE en el Apps Script). Se pide una sola vez:',
+      ''
+    );
+    if (clave === null || !clave.trim()) return false;
+    GM_setValue(CONFIG.claveSecreta, clave.trim());
+    return true;
+  }
+
+  // Desde el menú de Tampermonkey: permite cambiar URL y clave
   function configurar() {
     const actual = getConfig();
     const url = window.prompt(
@@ -137,9 +153,11 @@
   function leerDatos() {
     const contacto = getContacto();
     if (!contacto || !contacto.nombre) return null;
+    const cliente = mayus(getCliente() || '');
     return {
       nombre: mayus(contacto.nombre),
-      empresa: mayus(getCliente() || ''),
+      apellidos: cliente, // por defecto, igual que la empresa (editable en el cuadro)
+      empresa: cliente,
       correo: contacto.correo || '',
       telefonos: parseTelefonos(contacto.telefonosRaw),
     };
@@ -191,7 +209,32 @@
       .${CONFIG.claseTel}.existe { background: #ffe0b3; border-bottom-color: #f29900; }
       .${CONFIG.claseTel}.error { background: #f9c9c5; border-bottom-color: #d93025; }
       .${CONFIG.claseEstado} { margin-left: 6px; font-size: 12px; color: #444; }
+      .ot-ct-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100000;
+        display: flex; align-items: center; justify-content: center; font-family: Arial, sans-serif;
+      }
+      .ot-ct-dialogo {
+        background: #fff; border-radius: 8px; padding: 18px 20px; width: 420px; max-width: 92vw;
+        max-height: 92vh; overflow: auto; box-shadow: 0 8px 30px rgba(0,0,0,.35); box-sizing: border-box;
+      }
+      .ot-ct-dialogo h3 { margin: 0 0 12px; font-size: 16px; color: #222; }
+      .ot-ct-dialogo label { display: block; font-size: 12px; color: #555; margin: 10px 0 3px; }
+      .ot-ct-dialogo input, .ot-ct-dialogo textarea {
+        width: 100%; box-sizing: border-box; padding: 7px 8px; font-size: 14px;
+        border: 1px solid #bbb; border-radius: 4px; font-family: inherit;
+      }
+      .ot-ct-dialogo input:focus, .ot-ct-dialogo textarea:focus { outline: 2px solid #4285f4; border-color: #4285f4; }
+      .ot-ct-dialogo .ot-ct-mayus { text-transform: uppercase; }
+      .ot-ct-dialogo .ot-ct-ayuda { font-size: 11px; color: #888; margin-top: 2px; }
+      .ot-ct-dialogo .ot-ct-error { color: #d93025; font-size: 12px; margin-top: 10px; min-height: 14px; }
+      .ot-ct-dialogo .ot-ct-botones { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+      .ot-ct-dialogo button {
+        padding: 8px 16px; font-size: 14px; border-radius: 4px; cursor: pointer; border: 1px solid #bbb; background: #f5f5f5;
+      }
+      .ot-ct-dialogo button.ot-ct-aceptar { background: #4285f4; border-color: #4285f4; color: #fff; }
+      .ot-ct-dialogo button.ot-ct-aceptar:hover { background: #3367d6; }
       @media print {
+        .ot-ct-overlay { display: none !important; }
         .${CONFIG.claseTel} { background: none !important; border: none !important; }
         .${CONFIG.claseEstado} { display: none !important; }
       }
@@ -260,6 +303,103 @@
   }
 
   // ─────────────────────────────────────────────
+  // 5a. CUADRO DE CONFIRMACIÓN (editable)
+  // Permite corregir nombre, quitar un apellido, etc. antes de crear.
+  // Resuelve con los datos finales, o null si se cancela.
+  // ─────────────────────────────────────────────
+  function abrirConfirmacion(datos) {
+    return new Promise((resolve) => {
+      const previo = document.querySelector('.ot-ct-overlay');
+      if (previo) previo.remove();
+
+      const overlay = document.createElement('div');
+      overlay.className = 'ot-ct-overlay';
+      overlay.innerHTML = `
+        <div class="ot-ct-dialogo" role="dialog" aria-modal="true" aria-label="Crear contacto">
+          <h3>Crear contacto en Google Contacts</h3>
+          <label>Nombre</label>
+          <input type="text" class="ot-ct-mayus" data-campo="nombre" autocomplete="off">
+          <label>Apellidos</label>
+          <input type="text" class="ot-ct-mayus" data-campo="apellidos" autocomplete="off">
+          <label>Empresa</label>
+          <input type="text" class="ot-ct-mayus" data-campo="empresa" autocomplete="off">
+          <label>Correo</label>
+          <input type="text" data-campo="correo" autocomplete="off">
+          <label>Teléfonos</label>
+          <textarea rows="2" data-campo="telefonos"></textarea>
+          <div class="ot-ct-ayuda">Uno por línea. Los celulares colombianos se guardan con +57.</div>
+          <div class="ot-ct-error"></div>
+          <div class="ot-ct-botones">
+            <button type="button" class="ot-ct-cancelar">Cancelar</button>
+            <button type="button" class="ot-ct-aceptar">Aceptar</button>
+          </div>
+        </div>`;
+
+      const campo = (n) => overlay.querySelector(`[data-campo="${n}"]`);
+      campo('nombre').value = datos.nombre || '';
+      campo('apellidos').value = datos.apellidos || '';
+      campo('empresa').value = datos.empresa || '';
+      campo('correo').value = datos.correo || '';
+      campo('telefonos').value = (datos.telefonos || []).join('\n');
+
+      // Mayúsculas reales (no solo visuales) mientras se escribe, sin mover el cursor
+      overlay.querySelectorAll('.ot-ct-mayus').forEach((inp) => {
+        inp.addEventListener('input', () => {
+          const pos = inp.selectionStart;
+          const v = mayus(inp.value);
+          if (v !== inp.value) {
+            inp.value = v;
+            try { inp.setSelectionRange(pos, pos); } catch (e) {}
+          }
+        });
+      });
+
+      const errorEl = overlay.querySelector('.ot-ct-error');
+
+      function cerrar(resultado) {
+        document.removeEventListener('keydown', alTeclear, true);
+        overlay.remove();
+        resolve(resultado);
+      }
+
+      function aceptar() {
+        const nombre = mayus(campo('nombre').value.replace(/\s+/g, ' ').trim());
+        const apellidos = mayus(campo('apellidos').value.replace(/\s+/g, ' ').trim());
+        const empresa = mayus(campo('empresa').value.replace(/\s+/g, ' ').trim());
+        const correo = campo('correo').value.trim();
+
+        const vistos = new Set();
+        const telefonos = [];
+        campo('telefonos').value.split(/[\n,;]+/).forEach((linea) => {
+          parseTelefonos(linea).forEach((t) => {
+            if (!vistos.has(t)) { vistos.add(t); telefonos.push(t); }
+          });
+        });
+
+        if (!nombre) { errorEl.textContent = 'El nombre no puede quedar vacío.'; campo('nombre').focus(); return; }
+        if (correo && !/^[^\s@]+@[^\s@]+$/.test(correo)) { errorEl.textContent = 'El correo no parece válido.'; campo('correo').focus(); return; }
+        if (!correo && telefonos.length === 0) { errorEl.textContent = 'Debe tener al menos un correo o un teléfono.'; return; }
+
+        cerrar({ nombre, apellidos, empresa, correo, telefonos });
+      }
+
+      function alTeclear(e) {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar(null); }
+        else if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' && overlay.contains(e.target)) {
+          e.preventDefault(); aceptar();
+        }
+      }
+
+      overlay.querySelector('.ot-ct-aceptar').addEventListener('click', aceptar);
+      overlay.querySelector('.ot-ct-cancelar').addEventListener('click', () => cerrar(null));
+      document.addEventListener('keydown', alTeclear, true);
+
+      document.body.appendChild(overlay);
+      campo('nombre').focus();
+    });
+  }
+
+  // ─────────────────────────────────────────────
   // 5. CLIC: CREAR CONTACTO
   // ─────────────────────────────────────────────
   function activar(spans) {
@@ -281,20 +421,21 @@
       if (ocupado) return;
 
       let cfg = getConfig();
-      if (!cfg.url || !cfg.clave) {
-        if (!configurar()) return;
+      if (!cfg.clave) {
+        if (!pedirClave()) return;
         cfg = getConfig();
       }
 
-      const datos = leerDatos();
-      if (!datos) {
+      const inicial = leerDatos();
+      if (!inicial) {
         marcar('error', 'No encontré el contacto en esta página.');
         return;
       }
-      if (!datos.correo && datos.telefonos.length === 0) {
-        marcar('error', 'El contacto no tiene correo ni teléfono.');
-        return;
-      }
+
+      ocupado = true; // evita abrir dos cuadros a la vez
+      const datos = await abrirConfirmacion(inicial);
+      ocupado = false;
+      if (!datos) return; // canceló: no se envía nada
 
       ocupado = true;
       marcar('guardando', 'Guardando…');
