@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         QR Órdenes de Trabajo - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      2.6.0
-// @description  QR con ID-MM-AAAA|NIT|NOMBRE|EMAIL del cliente codificados. Un solo canvas 100x100px, mes y año como texto debajo. Incluye botón para copiar el texto codificado al portapapeles.
+// @version      2.7.0
+// @description  QR con ID-MM-AAAA|NIT|NOMBRE|EMAIL del cliente codificados (el mes y año salen de la "Fecha creación" DD/MM/AAAA de la OT). Un solo canvas 100x100px, mes y año como texto debajo. Incluye botón para copiar el texto codificado al portapapeles.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
 // @grant        none
@@ -42,23 +42,58 @@
   // ─────────────────────────────────────────────
   // 2. FECHA DE CREACIÓN DESDE LA PÁGINA
   // ─────────────────────────────────────────────
+  const NOMBRES_MES = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+  ];
+
+  function armarFecha(mes, anio) {
+    const n = parseInt(mes, 10);
+    if (!(n >= 1 && n <= 12)) return null;
+    return {
+      mesNum   : String(n).padStart(2, '0'),
+      anio     : String(anio),
+      mesNombre: NOMBRES_MES[n - 1],
+    };
+  }
+
+  // La intranet muestra la fecha como "01/10/2026 13:53:12" (DD/MM/AAAA y hora).
+  // También se acepta el mes escrito con letras ("octubre 2026") por si el
+  // formato de la página cambia.
   function getCreationDate() {
     try {
       for (const el of document.querySelectorAll('*')) {
         if (el.children.length > 3) continue;
         const text = el.textContent || '';
-        if (/fecha\s+creaci[oó]n/i.test(text)) {
-          const m = text.match(
-            /\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)[,\s]+(\d{4})/i
-          );
-          if (m) {
-            const key = m[1].toLowerCase();
-            return {
-              mesNum   : MESES[key],
-              anio     : m[2],
-              mesNombre: m[1].charAt(0).toUpperCase() + key.slice(1),
-            };
-          }
+        if (!/fecha\s+creaci[oó]n/i.test(text)) continue;
+
+        // Se toma la fecha que va JUSTO DESPUÉS de la etiqueta "Fecha creación",
+        // no la primera que aparezca en un bloque grande de texto (que podría
+        // ser otra fecha de la página).
+        // 1) DD/MM/AAAA (con o sin hora, con o sin ceros a la izquierda)
+        const num = text.match(/fecha\s+creaci[oó]n\s*:?\s*(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})\b/i);
+        if (num) {
+          const f = armarFecha(num[2], num[3]);
+          if (f) return f;
+        }
+
+        // 2) Mes con letras + año
+        const m = text.match(
+          /fecha\s+creaci[oó]n\s*:?\s*(?:\d{1,2}\s+de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)[,\s]+(?:de\s+)?(\d{4})/i
+        );
+        if (m) {
+          const f = armarFecha(MESES[m[1].toLowerCase()], m[2]);
+          if (f) return f;
+        }
+
+        // 3) Respaldo (comportamiento anterior): mes con letras + año en cualquier
+        //    parte del bloque, por si hay texto entre la etiqueta y la fecha.
+        const m2 = text.match(
+          /\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)[,\s]+(\d{4})/i
+        );
+        if (m2) {
+          const f = armarFecha(MESES[m2[1].toLowerCase()], m2[2]);
+          if (f) return f;
         }
       }
     } catch(e) {}
@@ -88,7 +123,7 @@
           // Extraer nombre — buscar después de "Contacto" y antes de "E-mail"
           const cleaned = text.replace(/\s+/g, ' ').trim();
 
-          const nombreMatch = cleaned.match(/contacto\s+([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑA-Za-záéíóúüñ\s]{3,60?})\s+(E-mail|Tel[eé]fono|Editar)/i);
+          const nombreMatch = cleaned.match(/contacto\s+([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑA-Za-záéíóúüñ\s]{3,60})\s+(E-mail|Tel[eé]fono|Editar)/i);
           if (nombreMatch) {
             result.nombre = nombreMatch[1].trim();
           }
@@ -122,13 +157,13 @@
       for (const el of document.querySelectorAll('*')) {
         if (el.children.length > 6) continue;
         const text = el.textContent || '';
-        if (text.length > 400 || !/\bNIT\b/i.test(text)) continue;
+        if (text.length > 400 || !/NIT:?\s*\d/i.test(text)) continue;
 
         const nitMatch = text.match(/NIT:?\s*([\d.\-]{5,20})/i);
         if (!nitMatch) continue;
 
         const cleaned = text.replace(/\s+/g, ' ').trim();
-        const nombreMatch = cleaned.match(/cliente\s+([A-ZÁÉÍÓÚÜÑ0-9][A-ZÁÉÍÓÚÜÑ0-9A-Za-záéíóúüñ.,&\s-]{3,80?})\s+NIT/i);
+        const nombreMatch = cleaned.match(/cliente\s+([A-ZÁÉÍÓÚÜÑ0-9][A-ZÁÉÍÓÚÜÑ0-9A-Za-záéíóúüñ.,&\s-]{3,80})\s+NIT/i);
 
         result.nit = nitMatch[1].trim();
         if (nombreMatch) result.nombre = nombreMatch[1].trim();
