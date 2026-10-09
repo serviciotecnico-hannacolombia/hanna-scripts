@@ -16,7 +16,7 @@ Instala solo los que uses — cada uno vive en su propia página de la intranet 
 | **WhatsApp OT** | `.../stecnico/item/*` | Igual que el anterior pero para la página de la OT. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/whatsapp-ot.user.js) |
 | **Lineamientos del Cliente** | `.../stecnico/item/N` (solo "Ver Detalle") | Detecta el NIT del cliente y muestra sus lineamientos especiales (por categoría) debajo de la tarjeta de Estado, leídos desde Google Sheets. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/lineamientos-cliente.user.js) |
 | **Autocompletar Cotización SGV** | `.../sgv/ingresos/cotizaciones/crear` | Llena Fecha Primer Seguimiento (+2 días hábiles) y Fecha Cierre (+2 meses, ajustada a día hábil), agrega el comentario de la OTST relacionada si aplica, y completa "Información de Aplicación" con un texto por defecto. Solo llena campos vacíos. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/cotizacion-sgv.user.js) |
-| **Guardar Contacto en Google Contacts** | `.../stecnico/item/N` (solo detalle de la OT) | Resalta el teléfono del contacto en la OT; amarillo si aún no está guardado y verde si ya existe; al hacer clic ("Crear contacto") abre un cuadro de confirmación editable y, al aceptar, lo guarda en Google Contacts con etiqueta "Client" y foto aleatoria, sin duplicar. Nombre, apellido y empresa siempre en MAYÚSCULAS. Requiere un Apps Script propio (ver sección abajo). | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/contactos-google.user.js) |
+| **Guardar Contacto en Google Contacts** | `.../stecnico/item/N` (solo detalle de la OT) | Resalta cada teléfono del contacto en la OT y revisa número por número si ya está guardado (gris "Buscando…" → verde con el primer nombre, o amarillo "No guardado"); al hacer clic ("Crear contacto") abre un cuadro de confirmación editable y, al aceptar, crea el contacto en Google Contacts con etiqueta "Client" y foto aleatoria, sin duplicar. Nombre, apellido y empresa siempre en MAYÚSCULAS. Requiere un Apps Script propio (ver sección abajo). | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/contactos-google.user.js) |
 
 ## Instalación (una sola vez, por persona, por cada script)
 
@@ -395,7 +395,17 @@ Esto es puramente visual (solo cambia lo que se ve en el navegador de quien teng
 
 ## Guardar Contacto en Google Contacts (Apps Script + userscript)
 
-En el detalle de la OT el teléfono del contacto aparece **resaltado en amarillo**; al pasar el mouse dice "Crear contacto" y al hacer clic abre un **cuadro de confirmación** con Nombre, Apellidos, Empresa, Correo y Teléfonos (uno por línea) ya llenos pero editables: puedes corregir el nombre, quitar un apellido, etc. Con **Aceptar** (o Enter) se crea el contacto en **tu** Google Contacts; con **Cancelar** (o Esc) no se envía nada (si no hay teléfono, resalta el correo). Si hay varios números, cualquiera de ellos crea el mismo contacto con todos los números. **Color del número:** *amarillo* = el contacto aún no está guardado; *verde* = ya existe en tus contactos (el script lo consulta al abrir la OT; tarda 1-3 segundos y, si lo acabas de crear, queda verde de inmediato aunque Google tarde unos minutos en verlo); *rojo* = hubo un error al guardar. Si no has puesto la clave todavía, no consulta y queda amarillo. Nombre, apellido y empresa se guardan siempre en **MAYÚSCULAS**:
+En el detalle de la OT cada teléfono del contacto aparece **resaltado** y se revisa **número por número** si ya está en tus contactos (una sola consulta para todos). El primer número es el **principal** y los demás suelen ser compañeros, así que cada uno tiene su propio estado:
+
+| Estado del número | Qué significa |
+|---|---|
+| Gris, "Buscando…" | Consultando tus contactos |
+| Verde, "✓ JENNY" | Ya está guardado; se muestra el **primer nombre** con el que lo tienes (el tooltip muestra el nombre completo). "(por correo)" en el principal = la persona existe con el mismo correo pero con otro teléfono |
+| Amarillo, "No guardado" | No existe en tus contactos |
+| Amarillo, "No verificado" / "Sin verificar" | No se pudo consultar (Apps Script desactualizado, error de red o falta la clave); el tooltip explica el motivo |
+| Rojo | Hubo un error al guardar |
+
+Al hacer clic en un número se abre un **cuadro de confirmación** con Nombre, Apellidos, Empresa y Correo ya llenos (siempre los datos del contacto principal, para que tú cambies el nombre si es otra persona) y **solo el teléfono clicado**. Con **Aceptar** (o Enter) se crea ese contacto en **tu** Google Contacts; con **Cancelar** (o Esc) no se envía nada. Solo el número guardado cambia a verde. Si no hay teléfono, se resalta el correo. Nombre, apellido y empresa se guardan siempre en **MAYÚSCULAS**; los celulares se guardan sin +57. Un contacto recién creado se ve verde de inmediato durante 10 minutos aunque Google tarde en indexarlo.
 
 | Google Contacts | Sale de la OT |
 |---|---|
@@ -422,7 +432,7 @@ Cada técnico crea su propio Apps Script para que los contactos queden en **su**
 Si cambias el código del Apps Script: **Implementar → Administrar implementaciones → editar → Versión nueva** (la URL no cambia).
 
 **Si el número no se pone verde aunque el contacto exista:**
-1. Abre la URL `/exec` en el navegador: debe mostrar `"version":"1.5"` (o mayor). Si no muestra versión, el Apps Script está desactualizado: pega el `.gs` nuevo y publica una **versión nueva**.
+1. Abre la URL `/exec` en el navegador: debe mostrar `"version":"1.6"` (o mayor). Si no muestra versión, el Apps Script está desactualizado: pega el `.gs` nuevo y publica una **versión nueva**.
 2. Pasa el mouse sobre el número amarillo: si dice *"no se pudo verificar…"*, ahí aparece el motivo. También queda en la consola (F12) como `[Contactos] Respuesta de la consulta`.
 3. La detección compara el correo y los últimos 10 dígitos del teléfono contra tu lista de contactos (no importan espacios, guiones ni +57). Un contacto recién creado en Google puede tardar unos minutos en verse.
 

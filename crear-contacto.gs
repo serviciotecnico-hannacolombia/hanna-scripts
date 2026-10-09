@@ -27,7 +27,7 @@
  */
 
 var ETIQUETA_CONTACTOS = 'Client';
-var VERSION = '1.5'; // si abres la URL /exec en el navegador debe mostrar esta versión
+var VERSION = '1.6'; // si abres la URL /exec en el navegador debe mostrar esta versión
 
 // ─────────────────────────────────────────────
 // Puntos de entrada
@@ -93,8 +93,11 @@ function crearContacto_(datos) {
     return { ok: false, error: 'El contacto no tiene correo ni teléfono' };
   }
 
-  // 1) ¿Ya existe?
-  var existente = buscarExistente_(correo, telefonos);
+  // 1) ¿Ya existe? Cada teléfono es una persona distinta (el principal y sus
+  // compañeros pueden compartir el mismo correo de autocompletado), así que
+  // si hay teléfonos se compara SOLO por teléfono; el correo se usa
+  // únicamente cuando el contacto no trae ningún teléfono.
+  var existente = buscarExistente_(telefonos.length ? '' : correo, telefonos);
   if (existente) {
     return { ok: true, estado: 'existente', nombre: nombreDe_(existente) };
   }
@@ -131,13 +134,64 @@ function crearContacto_(datos) {
   return { ok: true, estado: 'creado', nombre: nombre, etiqueta: etiquetaOk, foto: fotoOk };
 }
 
-// Solo consulta: devuelve si ya hay un contacto con ese correo o teléfono
+// Solo consulta. Una única pasada por la lista de contactos que responde,
+// POR CADA TELÉFONO recibido, si existe y con qué nombre está guardado. El
+// correo se informa aparte (sirve para el número principal: si su teléfono no
+// está pero el correo sí, la persona existe con otro número).
+// Respuesta: { ok, version, resultados: [{telefono, existe, nombre}, ...],
+//              correo: {existe, nombre} }   (resultados en el mismo orden)
 function consultarContacto_(datos) {
   var correo = limpiar_(datos.correo).toLowerCase();
   var telefonos = (datos.telefonos || []).map(limpiar_).filter(Boolean);
-  if (!correo && telefonos.length === 0) return { ok: true, existe: false };
-  var p = buscarExistente_(correo, telefonos);
-  return { ok: true, existe: !!p, nombre: p ? nombreDe_(p) : '' };
+
+  var resultados = telefonos.map(function (t) {
+    return { telefono: t, clave: ultimos10_(t), existe: false, nombre: '' };
+  });
+  var resCorreo = { existe: false, nombre: '' };
+
+  var pendientes = function () {
+    var faltaTel = resultados.some(function (r) { return r.clave && !r.existe; });
+    var faltaCorreo = correo && !resCorreo.existe;
+    return faltaTel || faltaCorreo;
+  };
+
+  if (pendientes()) {
+    var pageToken = null;
+    do {
+      var resp = People.People.Connections.list('people/me', {
+        pageSize: 1000,
+        personFields: 'names,emailAddresses,phoneNumbers',
+        pageToken: pageToken || undefined
+      });
+      var personas = (resp && resp.connections) || [];
+      for (var i = 0; i < personas.length; i++) {
+        var p = personas[i];
+        var nombre = nombreDe_(p);
+        if (correo && !resCorreo.existe && (p.emailAddresses || []).some(function (m) {
+          return limpiar_(m.value).toLowerCase() === correo;
+        })) {
+          resCorreo = { existe: true, nombre: nombre };
+        }
+        (p.phoneNumbers || []).forEach(function (tel) {
+          var d = ultimos10_(tel.value);
+          if (!d) return;
+          resultados.forEach(function (r) {
+            if (!r.existe && r.clave === d) { r.existe = true; r.nombre = nombre; }
+          });
+        });
+      }
+      pageToken = resp && resp.nextPageToken;
+    } while (pageToken && pendientes()); // se detiene en cuanto todo quedó resuelto
+  }
+
+  return {
+    ok: true,
+    version: VERSION,
+    resultados: resultados.map(function (r) {
+      return { telefono: r.telefono, existe: r.existe, nombre: r.nombre };
+    }),
+    correo: resCorreo
+  };
 }
 
 // ─────────────────────────────────────────────

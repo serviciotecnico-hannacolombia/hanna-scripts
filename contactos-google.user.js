@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Guardar Contacto en Google Contacts - OT Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.4.1
-// @description  En el detalle de una OT resalta el teléfono del contacto; al hacer clic sobre él (tooltip "Crear contacto") abre un cuadro de confirmación editable (nombre, apellidos, empresa, correo y teléfonos; nombre/apellidos/empresa en MAYÚSCULAS) y, al aceptar, guarda el contacto en Google Contacts con la etiqueta "Client" y una foto aleatoria, usando un Google Apps Script propio. El número se ve en amarillo si el contacto aún no está guardado y en verde si ya existe en tus contactos. No duplica contactos que ya existen.
+// @version      1.5.0
+// @description  En el detalle de una OT resalta cada teléfono del contacto y revisa, número por número, si ya está guardado en Google Contacts: gris "Buscando…" mientras consulta, verde con el primer nombre con el que está guardado, o amarillo "No guardado". Al hacer clic en un número abre un cuadro de confirmación editable (nombre, apellidos, empresa y correo autocompletados; solo ese número) y, al aceptar, crea el contacto con la etiqueta "Client" y una foto aleatoria usando un Google Apps Script propio.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
 // @grant        GM_xmlhttpRequest
@@ -165,7 +165,7 @@
   // ─────────────────────────────────────────────
   // 3. ENVIAR AL APPS SCRIPT
   // ─────────────────────────────────────────────
-  function enviar(datos, cfg) {
+  function enviar(datos, cfg, timeoutMs) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: 'POST',
@@ -173,7 +173,7 @@
         // text/plain evita el preflight CORS; el Apps Script lee el cuerpo igual.
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         data: JSON.stringify(Object.assign({ clave: cfg.clave }, datos)),
-        timeout: 60000,
+        timeout: timeoutMs || 60000,
         onload: (r) => {
           try {
             resolve(JSON.parse(r.responseText));
@@ -206,32 +206,41 @@
     return llaves;
   }
 
+  function primerNombre(nombreCompleto) {
+    return (nombreCompleto || '').trim().split(/\s+/)[0] || '';
+  }
+
   function leerRecientes() {
     try {
       const obj = JSON.parse(GM_getValue(CLAVE_RECIENTES, '{}') || '{}');
       const ahora = Date.now();
-      Object.keys(obj).forEach((k) => { if (ahora - obj[k] > TTL_RECIENTES_MS) delete obj[k]; });
-      return obj;
+      const salida = {};
+      Object.keys(obj).forEach((k) => {
+        const v = obj[k];
+        const t = typeof v === 'number' ? v : (v && v.t) || 0;
+        if (ahora - t <= TTL_RECIENTES_MS) salida[k] = { t, n: (v && v.n) || '' };
+      });
+      return salida;
     } catch (e) {
       return {};
     }
   }
 
+  // Se recuerda cada teléfono (y el correo) con el primer nombre con el que se guardó
   function recordarCreado(datos) {
     const obj = leerRecientes();
     const ahora = Date.now();
-    llavesDe(datos).forEach((k) => { obj[k] = ahora; });
+    llavesDe(datos).forEach((k) => { obj[k] = { t: ahora, n: primerNombre(datos.nombre) }; });
     try { GM_setValue(CLAVE_RECIENTES, JSON.stringify(obj)); } catch (e) {}
   }
 
-  function fueCreadoReciente(datos) {
-    const obj = leerRecientes();
-    return llavesDe(datos).some((k) => k in obj);
+  function recienteDe(llave) {
+    return llave ? (leerRecientes()[llave] || null) : null;
   }
 
-  // Pregunta al Apps Script si ya existe un contacto con estos datos
-  function consultarExistente(datos, cfg) {
-    return enviar(Object.assign({ accion: 'consultar' }, datos), cfg);
+  function llaveTel(t) {
+    const d = String(t || '').replace(/\D/g, '');
+    return d ? 't:' + (d.length > 10 ? d.slice(-10) : d) : '';
   }
 
   // ─────────────────────────────────────────────
@@ -251,6 +260,11 @@
       }
       .${CONFIG.claseTel}:hover { background: #ffe066; }
       .${CONFIG.claseTel}.guardando { opacity: .6; cursor: wait; }
+      .${CONFIG.claseTel}.buscando {
+        background: #e6e6e6; border-bottom-color: #9e9e9e;
+        animation: ot-ct-pulso 1.1s ease-in-out infinite;
+      }
+      @keyframes ot-ct-pulso { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
       .${CONFIG.claseTel}.ok { background: #c9f0d1; border-bottom-color: #1e8e3e; }
       .${CONFIG.claseTel}.error { background: #f9c9c5; border-bottom-color: #d93025; }
       .${CONFIG.claseEstado} { margin-left: 6px; font-size: 12px; color: #444; }
@@ -318,9 +332,14 @@
       while ((m = REGEX_CELULAR.exec(texto)) !== null) {
         coincidencias.push({ inicio: m.index, fin: m.index + m[0].length });
       }
+      // Se envuelve de atrás hacia adelante (para no mover los índices), pero los
+      // spans se guardan en el orden en que aparecen en la página: el PRIMERO es
+      // el número principal.
+      const delNodo = [];
       for (let i = coincidencias.length - 1; i >= 0; i--) {
-        spans.unshift(envolver(nodo, coincidencias[i].inicio, coincidencias[i].fin));
+        delNodo.unshift(envolver(nodo, coincidencias[i].inicio, coincidencias[i].fin));
       }
+      spans.push(...delNodo);
     }
     if (spans.length) return spans;
 
@@ -445,62 +464,103 @@
   }
 
   // ─────────────────────────────────────────────
-  // 5. CLIC: CREAR CONTACTO
+  // 5. ESTADO POR NÚMERO Y CLIC: CREAR CONTACTO
+  // Cada número resaltado es una persona distinta (el primero es el
+  // principal; los demás suelen ser compañeros) y tiene su propio estado:
+  //   gris "Buscando…" -> verde "✓ NOMBRE" | amarillo "No guardado".
   // ─────────────────────────────────────────────
-  function activar(spans) {
-    const ultimo = spans[spans.length - 1];
-    const estadoEl = document.createElement('span');
-    estadoEl.className = CONFIG.claseEstado;
-    ultimo.insertAdjacentElement('afterend', estadoEl);
+  function activar(spans, esCorreo) {
+    const base = leerDatos(); // nombre, apellidos, empresa y correo del contacto principal
 
-    let ocupado = false;
+    const slots = spans.map((sp, i) => {
+      const est = document.createElement('span');
+      est.className = CONFIG.claseEstado;
+      sp.insertAdjacentElement('afterend', est);
+      const telefono = esCorreo ? null : (parseTelefonos(sp.textContent)[0] || null);
+      const llave = telefono ? llaveTel(telefono) : (base && base.correo ? 'c:' + base.correo.toLowerCase() : '');
+      return { sp, est, telefono, llave, principal: i === 0, estado: null, resuelto: false };
+    });
 
-    function marcar(clase, texto, tooltip) {
-      spans.forEach((sp) => {
-        sp.classList.remove('guardando', 'ok', 'error');
-        if (clase) sp.classList.add(clase);
-        sp.title = tooltip || 'Crear contacto';
-      });
-      estadoEl.textContent = texto || '';
+    // estado: 'buscando' | 'guardando' | 'ok' | 'error' | null (amarillo)
+    function marcar(slot, estado, texto, tooltip) {
+      slot.sp.classList.remove('buscando', 'guardando', 'ok', 'error');
+      if (estado) slot.sp.classList.add(estado);
+      slot.sp.title = tooltip || 'Crear contacto';
+      slot.est.textContent = texto || '';
+      slot.estado = estado;
     }
 
-    function avisarSinVerificar(motivo) {
-      spans.forEach((sp) => {
-        if (!sp.classList.contains('ok') && !sp.classList.contains('guardando')) {
-          sp.title = 'Crear contacto (no se pudo verificar si ya existe: ' + motivo + ')';
+    function marcarGuardado(slot, nombreCompleto, sufijo) {
+      marcar(slot, 'ok', '✓ ' + (primerNombre(nombreCompleto) || 'Guardado') + (sufijo || ''), 'Ya guardado: ' + nombreCompleto);
+    }
+
+    // Al abrir la OT: revisa cada número (una sola consulta para todos)
+    async function verificarAlCargar() {
+      slots.forEach((s) => {
+        const rec = recienteDe(s.llave);
+        if (rec) {
+          marcar(s, 'ok', '✓ ' + (rec.n || 'Guardado'), 'Ya guardado en tus contactos');
+          s.resuelto = true;
         }
       });
-    }
+      const pend = slots.filter((s) => !s.resuelto);
+      if (!pend.length) return;
 
-    // Al abrir la OT: verde si el contacto ya existe, amarillo si no
-    async function verificarAlCargar() {
-      const datos = leerDatos();
-      if (!datos || (!datos.correo && datos.telefonos.length === 0)) return;
-
-      if (fueCreadoReciente(datos)) {
-        marcar('ok', '✓ Guardado', 'Ya guardado en tus contactos');
+      const cfg = getConfig();
+      if (!cfg.clave) {
+        pend.forEach((s) => marcar(s, null, 'Sin verificar',
+          'Crear contacto (falta la clave: se pedirá al hacer clic; aún no se verificó si ya existe)'));
         return;
       }
 
-      const cfg = getConfig();
-      if (!cfg.clave) return; // sin clave todavía: se queda amarillo
+      pend.forEach((s) => marcar(s, 'buscando', 'Buscando…', 'Buscando en tus contactos…'));
+
+      const telPend = pend.filter((s) => s.telefono);
+      const principalPend = pend.find((s) => s.principal);
+      const correo = principalPend && base ? base.correo : '';
+
       try {
-        const r = await consultarExistente(datos, cfg);
+        const r = await enviar(
+          { accion: 'consultar', telefonos: telPend.map((s) => s.telefono), correo },
+          cfg, 20000
+        );
         console.log('[Contactos] Respuesta de la consulta:', r);
-        if (spans[0].classList.contains('guardando')) return; // se está guardando ahora mismo: no pisar su estado
-        if (r && r.ok && r.existe) {
-          marcar('ok', '✓ Guardado', 'Ya guardado: ' + (r.nombre || 'contacto existente'));
-        } else if (!r || !r.ok) {
-          // No se pudo verificar (p. ej. Apps Script sin actualizar): se explica en el tooltip
-          avisarSinVerificar((r && r.error) || 'respuesta inesperada');
+        if (!r || !r.ok) throw new Error((r && r.error) || 'respuesta inesperada');
+        if (!Array.isArray(r.resultados)) {
+          throw new Error('el Apps Script está desactualizado: publica la versión nueva');
         }
+
+        pend.forEach((s) => {
+          if (s.estado !== 'buscando') return; // el usuario ya empezó a guardarlo: no pisar su estado
+          if (s.telefono) {
+            const res = r.resultados[telPend.indexOf(s)];
+            if (res && res.existe) return marcarGuardado(s, res.nombre);
+          }
+          // El principal también cuenta como guardado si su correo existe (con otro teléfono)
+          if (s.principal && r.correo && r.correo.existe) {
+            marcar(s, 'ok', '✓ ' + (primerNombre(r.correo.nombre) || 'Guardado') + ' (por correo)',
+              'Guardado por correo como: ' + r.correo.nombre + ' (con otro teléfono)');
+            return;
+          }
+          marcar(s, null, 'No guardado', 'Crear contacto');
+        });
       } catch (e) {
-        console.warn('[Contactos] No se pudo verificar si el contacto ya existe:', e.message);
-        avisarSinVerificar(e.message);
+        console.warn('[Contactos] No se pudo verificar si ya existen:', e.message);
+        pend.forEach((s) => {
+          if (s.estado === 'buscando') {
+            marcar(s, null, 'No verificado', 'Crear contacto (no se pudo verificar si ya existe: ' + e.message + ')');
+          }
+        });
       }
     }
 
-    async function crear() {
+    function coincide(slot, datos) {
+      if (slot.telefono) return datos.telefonos.some((t) => llaveTel(t) === slot.llave);
+      return Boolean(datos.correo) && slot.llave === 'c:' + datos.correo.toLowerCase();
+    }
+
+    let ocupado = false;
+    async function crear(slot) {
       if (ocupado) return;
 
       let cfg = getConfig();
@@ -511,44 +571,48 @@
 
       const inicial = leerDatos();
       if (!inicial) {
-        marcar('error', 'No encontré el contacto en esta página.');
+        marcar(slot, 'error', 'No encontré el contacto en esta página.');
         return;
       }
 
+      // Siempre los mismos datos de autocompletado (nombre, apellidos, empresa y
+      // correo del contacto principal); solo cambia el teléfono: el del número
+      // clicado. Cada quien edita el nombre en el cuadro si es otra persona.
+      const propuesta = Object.assign({}, inicial, { telefonos: slot.telefono ? [slot.telefono] : [] });
+
       ocupado = true; // evita abrir dos cuadros a la vez
-      const datos = await abrirConfirmacion(inicial);
+      const datos = await abrirConfirmacion(propuesta);
       ocupado = false;
       if (!datos) return; // canceló: no se envía nada
 
       ocupado = true;
-      marcar('guardando', 'Guardando…');
+      marcar(slot, 'guardando', 'Guardando…');
       try {
         const r = await enviar(datos, cfg);
         if (!r.ok) {
-          marcar('error', 'Error: ' + (r.error || 'desconocido'));
-        } else if (r.estado === 'existente') {
-          recordarCreado(datos);
-          marcar('ok', 'Ya existía en tus contactos: ' + r.nombre, 'Ya guardado: ' + r.nombre);
+          marcar(slot, 'error', 'Error: ' + (r.error || 'desconocido'));
         } else {
           recordarCreado(datos);
-          const faltas = [];
-          if (r.etiqueta === false) faltas.push('la etiqueta');
-          if (r.foto === false) faltas.push('la foto');
-          marcar(
-            'ok',
-            'Guardado: ' + datos.nombre +
-              (faltas.length ? ' (no se pudo poner ' + faltas.join(' ni ') + ')' : ''),
-            'Ya guardado: ' + datos.nombre
-          );
+          const afectados = slots.filter((s) => coincide(s, datos));
+          const objetivo = afectados.length ? afectados : [slot];
+          const existia = r.estado === 'existente';
+          const nombreMostrar = existia ? r.nombre : datos.nombre;
+          objetivo.forEach((s) => marcarGuardado(s, nombreMostrar, existia ? ' (ya existía)' : ''));
+          if (!existia) {
+            const faltas = [];
+            if (r.etiqueta === false) faltas.push('la etiqueta');
+            if (r.foto === false) faltas.push('la foto');
+            if (faltas.length) slot.est.textContent += ' (no se pudo poner ' + faltas.join(' ni ') + ')';
+          }
         }
       } catch (e) {
-        marcar('error', e.message);
+        marcar(slot, 'error', e.message);
       } finally {
         ocupado = false;
       }
     }
 
-    spans.forEach((sp) => sp.addEventListener('click', crear));
+    slots.forEach((s) => s.sp.addEventListener('click', () => crear(s)));
     verificarAlCargar();
   }
 
@@ -560,10 +624,14 @@
     injectStyles();
     const contacto = getContacto();
     let spans = resaltarTelefonos(celda);
-    if (!spans.length) spans = resaltarCorreo(celda, contacto && contacto.correo);
+    let esCorreo = false;
+    if (!spans.length) {
+      spans = resaltarCorreo(celda, contacto && contacto.correo);
+      esCorreo = true;
+    }
     if (!spans.length) return;
 
-    activar(spans);
+    activar(spans, esCorreo);
     GM_registerMenuCommand('Configurar contactos de Google', configurar);
   }
 
