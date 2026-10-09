@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         QR Órdenes de Trabajo - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      2.7.0
-// @description  QR con ID-MM-AAAA|NIT|NOMBRE|EMAIL del cliente codificados (el mes y año salen de la "Fecha creación" DD/MM/AAAA de la OT). Un solo canvas 100x100px, mes y año como texto debajo. Incluye botón para copiar el texto codificado al portapapeles.
+// @version      2.8.0
+// @description  QR con formato OTST-MM-AAAA|NIT|correo codificado (el mes y año salen de la "Fecha creación" DD/MM/AAAA de la OT). Un solo canvas 100x100px, mes y año como texto debajo. Incluye botón para copiar el texto codificado al portapapeles.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
 // @grant        none
@@ -36,7 +36,7 @@
     const segs = window.location.pathname.split('/').filter(Boolean);
     const i = segs.indexOf('item');
     const id = i !== -1 ? segs[i + 1] : null;
-    return (id && /^[a-zA-Z0-9\-_]+$/.test(id)) ? id : null;
+    return (id && /^[a-zA-Z0-9_]+$/.test(id)) ? id : null;
   }
 
   // ─────────────────────────────────────────────
@@ -49,7 +49,9 @@
 
   function armarFecha(mes, anio) {
     const n = parseInt(mes, 10);
+    const a = parseInt(anio, 10);
     if (!(n >= 1 && n <= 12)) return null;
+    if (!(a >= 2000 && a <= 2100)) return null;
     return {
       mesNum   : String(n).padStart(2, '0'),
       anio     : String(anio),
@@ -177,28 +179,15 @@
 
   // ─────────────────────────────────────────────
   // 5. CONSTRUIR VALOR DEL QR
-  // Formato: 39885-04-2026|NIT|NOMBRE|EMAIL
-  // Los campos de cliente se omiten si no se encuentran, priorizando NIT
-  // (llave corta y estable) sobre nombre/correo para no inflar el QR.
-  // Sigue siendo compatible con lectores de QR viejos (39885-04-2026|EMAIL).
+  // Formato: 39885-04-2026|NIT|correo
+  // Siempre tres campos separados por '|'; si falta NIT o correo, el campo queda vacío.
   // ─────────────────────────────────────────────
   function buildQRValue(orderId, dateInfo, clienteEmpresa, contacto) {
+    // Formato único: OTST-MM-AAAA|NIT|correo  (siempre tres campos)
     const base = dateInfo
       ? `${orderId}-${dateInfo.mesNum}-${dateInfo.anio}`
       : orderId;
-
-    const nit    = clienteEmpresa.nit || '';
-    const nombre = clienteEmpresa.nombre || '';
-    const correo = contacto.email || '';
-
-    const parts = [base];
-    if (nit && nombre && correo)      parts.push(nit, nombre, correo);
-    else if (nit && correo)           parts.push(nit, correo);
-    else if (nit && nombre)           parts.push(nit, nombre, '');
-    else if (nit)                     parts.push(nit);
-    else if (correo)                  parts.push(correo); // formato antiguo, sin NIT
-
-    const value = parts.join('|');
+    const value = [base, clienteEmpresa.nit || '', contacto.email || ''].join('|');
     console.log(`[OT QR] Valor codificado: ${value}`);
     return value;
   }
