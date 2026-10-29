@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.19
+// @version      16.20
 // @description  Panel completo: Mediciones/Soluciones/Plantillas de Diagnóstico 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.19';
+    var APP_VERSION = '16.20';
 
     var columnasPorFilaLecturas = 3;
 
@@ -1626,6 +1626,64 @@
         return problemas;
     }
 
+    // Revisa las comillas de los atributos de una etiqueta de apertura, p.ej.
+    // <mark style=""background-color: orange;"> (comilla doble de más: el
+    // navegador lo lee como style="" y el color se pierde sin ningún aviso).
+    // Devuelve la descripción del primer problema, o null si está bien.
+    function validarAtributosTag(tagTexto) {
+        var m = tagTexto.match(/^<([a-zA-Z][a-zA-Z0-9]*)([\s\S]*?)\/?>$/);
+        if (!m) return null;
+        var nombre = m[1].toLowerCase();
+        var resto = m[2];
+        var i = 0;
+        while (i < resto.length) {
+            while (i < resto.length && /\s/.test(resto.charAt(i))) i++;
+            if (i >= resto.length) break;
+            var c = resto.charAt(i);
+            if (c === '"' || c === "'") {
+                return 'Comilla de más en <' + nombre + '>';
+            }
+            if (c === '=') {
+                return 'Hay un "=" sin nombre de atributo en <' + nombre + '>';
+            }
+            var inicioNombre = i;
+            while (i < resto.length && !/[\s"'=]/.test(resto.charAt(i))) i++;
+            var atributo = resto.slice(inicioNombre, i);
+            var j = i;
+            while (j < resto.length && /\s/.test(resto.charAt(j))) j++;
+            if (resto.charAt(j) !== '=') {
+                if (resto.charAt(j) === '"' || resto.charAt(j) === "'") {
+                    return 'Falta el "=" antes del valor de ' + atributo + ' en <' + nombre + '>';
+                }
+                continue;
+            }
+            j++;
+            while (j < resto.length && /\s/.test(resto.charAt(j))) j++;
+            if (j >= resto.length) {
+                return 'El atributo ' + atributo + ' de <' + nombre + '> no tiene valor';
+            }
+            var q = resto.charAt(j);
+            if (q === '"' || q === "'") {
+                var cierreComilla = resto.indexOf(q, j + 1);
+                if (cierreComilla === -1) {
+                    return 'Falta cerrar la comilla de ' + atributo + ' en <' + nombre + '>';
+                }
+                i = cierreComilla + 1;
+                if (i < resto.length && !/[\s\/]/.test(resto.charAt(i))) {
+                    return 'Comilla de más o falta un espacio en ' + atributo + ' de <' + nombre + '>';
+                }
+            } else {
+                var inicioValor = j;
+                while (j < resto.length && !/\s/.test(resto.charAt(j))) j++;
+                if (/["'=]/.test(resto.slice(inicioValor, j))) {
+                    return 'Comillas mal puestas en ' + atributo + ' de <' + nombre + '>';
+                }
+                i = j;
+            }
+        }
+        return null;
+    }
+
     function calcularProblemasHTML(texto) {
         var tokens = tokenizarHTML(texto);
         var tagTokens = tokens.filter(function(t) { return t.tipo === 'tag'; });
@@ -1633,6 +1691,11 @@
         tokens.forEach(function(t) {
             if (t.tipo === 'error') {
                 problemas.push('Falta el ">" que cierra una etiqueta (línea ' + numeroDeLineaHTML(texto, t.inicio) + ')');
+            } else if (t.tipo === 'tag') {
+                var problemaAtributo = validarAtributosTag(t.texto);
+                if (problemaAtributo) {
+                    problemas.push(problemaAtributo + ' (línea ' + numeroDeLineaHTML(texto, t.inicio) + ')');
+                }
             }
         });
         return problemas;
@@ -1647,7 +1710,8 @@
         if (!m) return escaparHTML(tagTexto);
         var apertura = escaparHTML(m[1]);
         var nombre = '<span style="color:#0e7c86;font-weight:600;">' + escaparHTML(m[2]) + '</span>';
-        var resto = escaparHTML(m[3]).replace(/([a-zA-Z-]+)(=)(&quot;[^&]*?&quot;|&#39;[^&]*?&#39;)/g, function(full, an, eq, av) {
+        // escaparHTML no toca las comillas, así que aquí se buscan tal cual.
+        var resto = escaparHTML(m[3]).replace(/([a-zA-Z-]+)(=)("[^"]*"|'[^']*')/g, function(full, an, eq, av) {
             return '<span style="color:#9a6b00;">' + an + '</span>' + eq + '<span style="color:#2f7d4f;">' + av + '</span>';
         });
         var cierre = escaparHTML(m[4]);
@@ -1660,7 +1724,9 @@
         var tokens = tokenizarHTML(texto);
         var html = '';
         tokens.forEach(function(t) {
-            if (t.tipo === 'tag') {
+            if (t.tipo === 'tag' && validarAtributosTag(t.texto)) {
+                html += '<span style="background:#fbe4e2;text-decoration:underline wavy #b3261e;border-radius:2px;">' + resaltarTagHTML(t.texto) + '</span>';
+            } else if (t.tipo === 'tag') {
                 html += '<span style="background:rgba(14,124,134,0.10);border-radius:2px;">' + resaltarTagHTML(t.texto) + '</span>';
             } else if (t.tipo === 'error') {
                 html += '<span style="background:#fbe4e2;color:#b3261e;text-decoration:underline wavy #b3261e;border-radius:2px;">' + escaparHTML(t.texto) + '</span>';
