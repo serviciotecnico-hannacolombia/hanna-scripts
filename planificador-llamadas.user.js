@@ -1,12 +1,16 @@
 // ==UserScript==
 // @name         Planificador de Llamadas de Seguimiento - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.1.0
-// @description  En el Libro de Trabajo y en la Agenda rápida (/stecnico/agenda-llamadas): arma la lista de llamadas del día respetando el cupo (40 diarias = máx. 10 de seguimiento [vencidas/reprogramadas] + el resto nuevas sin contacto), muestra la carga de los próximos días hábiles (con festivos de Colombia), alertas, envejecimiento y avance del día. La Agenda abre al instante con la última lista guardada y actualiza el Libro de Trabajo en segundo plano. Deja la carga por día en el navegador para que "Llamada de Seguimiento Diagnóstico" sugiera la fecha con cupo. Solo lee la intranet: nunca cambia fechas ni envía formularios.
+// @version      1.2.0
+// @description  En el Libro de Trabajo y en la Agenda rápida (/stecnico/agenda-llamadas): arma tu lista de llamadas del día con tu cupo (p. ej. 40 = máx. 10 de seguimiento [vencidas/reprogramadas] + el resto nuevas sin contacto) y filtro "Mis técnicos", muestra la carga de los próximos días hábiles (con festivos de Colombia), alertas, envejecimiento y avance. La Agenda abre al instante con la última lista guardada y actualiza el Libro de Trabajo en segundo plano. Opcional: se sincroniza con un Google Sheet (Apps Script) para guardar la bitácora y los indicadores, y para que varias personas llamen desde la misma cola sin repetir OTST. Solo lee la intranet: nunca cambia fechas ni envía formularios.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/libro_trabajo*
 // @match        https://intranet.hannacolombia.com/stecnico/agenda-llamadas*
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @connect      script.google.com
+// @connect      script.googleusercontent.com
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/planificador-llamadas.user.js
 // @downloadURL  https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/planificador-llamadas.user.js
@@ -16,7 +20,9 @@
   'use strict';
 
   // Debe coincidir siempre con @version del header de arriba.
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
+  const SYNC_CADA_MS = 20 * 1000;    // Sheet: cada cuánto se consulta la cola compartida (pestaña visible)
+  const TOMADA_MIN = 20;             // una OTST "tomada" se libera sola a los 20 min si no se registra la llamada
   const URL_AGENDA = '/stecnico/agenda-llamadas';
   const URL_LIBRO = '/stecnico/libro_trabajo';
   const ES_AGENDA = location.pathname.startsWith(URL_AGENDA);
@@ -32,14 +38,22 @@
     inicioDia: 'hanna_pl_inicio_dia', // primera foto del día (para contar las llamadas hechas hoy)
     vistos: 'hanna_pl_vistos',        // otst -> día en que apareció por primera vez ('inicial' si ya estaba)
     hist: 'hanna_pl_historial',       // resumen diario
-    listaHoy: 'hanna_pl_lista_hoy',   // lista congelada del día
     contactos: 'hanna_pl_contactos',  // otst -> { n: nombre, t: timestamp }
     abierto: 'hanna_pl_abierto',
     filas: 'hanna_pl_filas',          // última lectura completa del Libro de Trabajo: { ts, filas }
     log: 'hanna_llamadas_log',        // bitácora que escribe llamada-seguimiento.user.js al dar Continuar
   };
 
-  const CFG_DEF = { cupoTotal: 40, cupoSeg: 10, diasGrafico: 10, alertaSemanas: 8 };
+  // cupoTotal / cupoSeg: TU cupo diario (cada persona el suyo).
+  // cupoSegEquipo: seguimientos por día hábil para reprogramar (regla del equipo;
+  //   con esto se arma la cola y la fecha sugerida del script de llamada).
+  // misTecnicos: si tiene nombres, tu lista solo toma OTST de esos técnicos.
+  const CFG_DEF = { cupoTotal: 40, cupoSeg: 10, cupoSegEquipo: 10, misTecnicos: [], diasGrafico: 10, alertaSemanas: 8 };
+  const config = () => {
+    const c = { ...CFG_DEF, ...leer(K.cfg, {}) };
+    if (!Array.isArray(c.misTecnicos)) c.misTecnicos = [];
+    return c;
+  };
   const DIAS_CORTOS = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'];
 
   // ─────────────────────────────────────────────
@@ -164,7 +178,7 @@
       if (f.fecha >= hoyK) agenda[f.fecha] = (agenda[f.fecha] || 0) + 1;
       let d = f.fecha <= inicioK ? inicio : deClave(f.fecha);
       if (!esHabil(d)) d = sigHabil(d);
-      while ((carga[clave(d)] || 0) >= cfg.cupoSeg) d = sigHabil(d);
+      while ((carga[clave(d)] || 0) >= cfg.cupoSegEquipo) d = sigHabil(d);
       f.plan = clave(d);
       f.corrida = f.fecha >= hoyK && f.plan !== f.fecha;
       carga[f.plan] = (carga[f.plan] || 0) + 1;
@@ -172,15 +186,16 @@
 
     const nuevas = filas.filter((f) => !f.fecha).sort((a, b) => b.dias - a.dias);
     let d = inicio, usados = 0;
-    const cupoNuevasDe = (k) => Math.max(0, cfg.cupoTotal - Math.min(cfg.cupoSeg, carga[k] || 0));
+    // Proyección: capNuevas = nuevas que el equipo alcanza a llamar por día
+    const capNuevas = Math.max(1, cfg.capNuevas || cfg.cupoTotal - cfg.cupoSeg);
     for (const f of nuevas) {
-      while (usados >= cupoNuevasDe(clave(d))) { d = sigHabil(d); usados = 0; }
+      if (usados >= capNuevas) { d = sigHabil(d); usados = 0; }
       f.tipo = 'nueva'; f.plan = clave(d); usados++;
     }
 
     // Fecha sugerida para reprogramar: primer día hábil después de hoy con cupo de seguimiento
     let s = sigHabil(hoy);
-    while ((carga[clave(s)] || 0) >= cfg.cupoSeg) s = sigHabil(s);
+    while ((carga[clave(s)] || 0) >= cfg.cupoSegEquipo) s = sigHabil(s);
 
     const ultimoSeg = seg.reduce((m, f) => (f.plan > m ? f.plan : m), inicioK);
     const ultimoNuevas = nuevas.reduce((m, f) => (f.plan > m ? f.plan : m), inicioK);
@@ -221,11 +236,8 @@
       if (!(o in actual)) cerradas++;
     });
 
-    // Lista del día: se congela en la primera carga del día para poder marcar el avance
-    let lista = leer(K.listaHoy, null);
-    if (!lista || lista.fecha !== hoyK) lista = congelarLista(plan, hoyK);
-    lista.items.forEach((it) => { it.hecha = hecha(it.otst, it.fechaIni); });
-    guardar(K.listaHoy, lista);
+    // OTST que cambiaron desde la primera foto del día (llamadas hechas, con o sin bitácora)
+    const cambiadas = Object.keys(ini.items).filter((o) => hecha(o, ini.items[o]));
 
     // Historial diario (se sobrescribe el del día en cada carga)
     const hist = leer(K.hist, {});
@@ -243,16 +255,9 @@
     guardar(K.foto, { fecha: hoyK, items: actual });
 
     // Plan para el script de llamada (carga de seguimiento por día)
-    guardar(K.plan, { generado: new Date().toISOString(), hoy: hoyK, cupoSeg: cfg.cupoSeg, carga: plan.carga, sugerida: plan.sugerida });
+    guardar(K.plan, { generado: new Date().toISOString(), hoy: hoyK, cupoSeg: cfg.cupoSegEquipo, carga: plan.carga, sugerida: plan.sugerida });
 
-    return { lista, hist, entradas: primeraVez ? null : entradas, hechasSeg, hechasNuevas, cerradas };
-  }
-
-  function congelarLista(plan, hoyK) {
-    const items = [...plan.seg, ...plan.nuevas]
-      .filter((f) => f.plan === plan.inicioK)
-      .map((f) => ({ otst: f.otst, tipo: f.tipo, fechaIni: f.fecha }));
-    return { fecha: hoyK, items };
+    return { ini, actual, cambiadas, hist, entradas: primeraVez ? null : entradas, hechasSeg, hechasNuevas, cerradas };
   }
 
   // Promedio de OTST nuevas por día hábil (con la foto diaria). Mientras no haya
@@ -296,6 +301,122 @@
       consultando = false;
       alTerminar();
     })();
+  }
+
+  // ─────────────────────────────────────────────
+  // Sincronización con Google Sheets (opcional, ver agenda-llamadas.gs)
+  // - Envía al Sheet cada llamada de la bitácora local (la escribe
+  //   llamada-seguimiento.user.js) y el resumen del día.
+  // - Trae las llamadas de las demás personas y las OTST "tomadas" (en llamada).
+  // La URL, la clave y tu nombre se guardan en Tampermonkey (no en la página).
+  // ─────────────────────────────────────────────
+  const gmGet = (k, d) => (typeof GM_getValue === 'function' ? GM_getValue(k, d) : leer(k, d));
+  const gmSet = (k, v) => (typeof GM_setValue === 'function' ? GM_setValue(k, v) : guardar(k, v));
+  const syncCfg = () => ({ url: (gmGet('hpl_sync_url', '') || '').trim(), clave: (gmGet('hpl_sync_clave', '') || '').trim(), usuario: (gmGet('hpl_sync_usuario', '') || '').trim() });
+  const syncActivo = () => { const c = syncCfg(); return !!(c.url && c.clave && c.usuario); };
+  const idDe = (e) => e.id || `${e.otst}|${e.ts}`;
+
+  let remoto = { ok: null, error: '', ts: 0, tomadas: {}, activos: {} };
+  let sincronizando = false;
+  let syncPendiente = null;
+
+  function pedirSheet(url, cuerpo) {
+    return new Promise((resolve, reject) => {
+      const alResponder = (texto) => { try { resolve(JSON.parse(texto)); } catch (e) { reject(new Error('respuesta inválida del Apps Script')); } };
+      if (typeof GM_xmlhttpRequest === 'function') {
+        GM_xmlhttpRequest({
+          method: 'POST', url, data: JSON.stringify(cuerpo), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, timeout: 20000,
+          onload: (r) => alResponder(r.responseText),
+          onerror: () => reject(new Error('sin conexión con el Apps Script')),
+          ontimeout: () => reject(new Error('el Apps Script tardó demasiado')),
+        });
+      } else if (typeof window.__hplServidorPrueba === 'function') {
+        window.__hplServidorPrueba(cuerpo).then((r) => resolve(r), reject); // solo para pruebas
+      } else reject(new Error('Tampermonkey no permite la conexión'));
+    });
+  }
+
+  // Tipo con el que empezó el día una OTST (para contar seguimiento vs nuevas)
+  function tipoInicial(otst) {
+    const ini = leer(K.inicioDia, null);
+    const f = ini && ini.items ? ini.items[otst] : null;
+    if (!f) return 'nueva';
+    const hoyK = clave(new Date());
+    return f < hoyK ? 'vencida' : f === hoyK ? 'hoy' : 'agendada';
+  }
+
+  async function sincronizar(extra) {
+    if (!syncActivo()) return;
+    if (sincronizando) { syncPendiente = { ...(syncPendiente || {}), ...(extra || {}) }; return; }
+    sincronizando = true;
+    const c = syncCfg();
+    const cfg = config();
+    const log = leer(K.log, []);
+    const enviados = new Set(gmGet('hpl_sync_enviados', []));
+    const info = {};
+    datos.filas.forEach((f) => { info[f.otst] = f; });
+    // Mis llamadas (las que escribió el script de llamada en ESTE navegador) aún no confirmadas
+    const mias = log.filter((e) => e && e.otst && !e.usuario && !enviados.has(idDe(e))).slice(-100).map((e) => ({
+      id: idDe(e), ts: e.ts, otst: e.otst, accion: e.accion, fecha: e.fecha || '',
+      tipo: e.tipo || tipoInicial(e.otst), cliente: (info[e.otst] || {}).cliente || '', tecnico: (info[e.otst] || {}).tecnico || '',
+    }));
+    const hoyK = clave(new Date());
+    const resumen = leer(K.hist, {})[hoyK];
+    const resumenTxt = resumen ? JSON.stringify(resumen) : '';
+    const cuerpo = {
+      clave: c.clave, usuario: c.usuario, cupoTotal: cfg.cupoTotal, cupoSeg: cfg.cupoSeg, tecnicos: cfg.misTecnicos,
+      llamadas: mias, ...(extra || {}),
+    };
+    if (resumen && resumenTxt !== gmGet('hpl_sync_resumen', '')) cuerpo.resumen = { dia: hoyK, ...resumen, colaDias: ultimaColaDias };
+    try {
+      const r = await pedirSheet(c.url, cuerpo);
+      if (!r || !r.ok) throw new Error((r && r.error) || 'error desconocido');
+      (r.recibidos || []).forEach((id) => enviados.add(id));
+      gmSet('hpl_sync_enviados', [...enviados].slice(-3000));
+      if (cuerpo.resumen) gmSet('hpl_sync_resumen', resumenTxt);
+      // Llamadas de las demás personas -> bitácora local (así se marcan ✅ aquí también)
+      const actualLog = leer(K.log, []);
+      const ids = new Set(actualLog.map(idDe));
+      let nuevos = 0;
+      (r.bitacora || []).forEach((e) => {
+        if (e && e.id && !ids.has(e.id) && e.usuario !== c.usuario) { actualLog.push({ ...e, remoto: true }); nuevos++; }
+      });
+      if (nuevos) guardar(K.log, actualLog.slice(-3000));
+      remoto = { ok: true, error: '', ts: Date.now(), tomadas: r.tomadas || {}, activos: r.activos || {}, bitacora: r.bitacora || [] };
+    } catch (e) {
+      remoto = { ...remoto, ok: false, error: e.message };
+    }
+    sincronizando = false;
+    if (datos.ts) render(); else pintarEstado();
+    if (syncPendiente) { const p = syncPendiente; syncPendiente = null; sincronizar(p); }
+  }
+
+  function tomadaPorOtro(otst) {
+    const t = remoto.tomadas && remoto.tomadas[otst];
+    if (!t || t.usuario === syncCfg().usuario) return null;
+    return Date.now() - t.ts < TOMADA_MIN * 60000 ? t : null;
+  }
+
+  function configurarSync() {
+    const c = syncCfg();
+    const url = prompt('URL de la aplicación web del Apps Script (termina en /exec). Déjala vacía para desactivar la sincronización:', c.url);
+    if (url === null) return;
+    if (!url.trim()) { gmSet('hpl_sync_url', ''); remoto = { ok: null, error: '', ts: 0, tomadas: {}, activos: {} }; render(); return; }
+    const claveS = prompt('Clave secreta (la misma CLAVE de las propiedades del Apps Script):', c.clave);
+    if (claveS === null) return;
+    const usuario = prompt('Tu nombre (así te verán las demás personas en la agenda):', c.usuario || nombreIntranet());
+    if (usuario === null || !usuario.trim()) return;
+    gmSet('hpl_sync_url', url.trim());
+    gmSet('hpl_sync_clave', claveS.trim());
+    gmSet('hpl_sync_usuario', usuario.trim());
+    sincronizar();
+  }
+
+  // Nombre de quien inició sesión, tomado de la barra superior de la intranet
+  function nombreIntranet() {
+    const el = [...document.querySelectorAll('b, strong, span, a, div')].find((x) => x.children.length === 0 && /\S/.test(x.textContent) &&
+      x.nextSibling && /Usuario Manager/i.test(x.parentElement ? x.parentElement.textContent : ''));
+    return el ? limpio(el.textContent) : '';
   }
 
   // ─────────────────────────────────────────────
@@ -372,6 +493,17 @@
       #hpl .tag.gar { background: #fff1c2; color: #8a6100; font-weight: 400; }
       #hpl .contacto { color: #6b7a8c; font-size: 11.5px; }
       #hpl a.llamar { font-weight: 700; }
+      #hpl .hpl-sync { font-size: 12px; white-space: nowrap; color: #6b7a8c; }
+      #hpl .hpl-sync.ok { color: #2f855a; } #hpl .hpl-sync.error { color: #c0392b; font-weight: 700; }
+      #hpl .hpl-tecs { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 8px; font-size: 12px; }
+      #hpl .hpl-tecs .t { color: #6b7a8c; }
+      #hpl .hpl-tecs button { border: 1px solid #d5dde8; background: #fff; color: #1f2d3d; border-radius: 12px; padding: 2px 9px; font-size: 11.5px; cursor: pointer; }
+      #hpl .hpl-tecs button small { color: #8a97a8; }
+      #hpl .hpl-tecs button.act { background: #e6f0fb; border-color: #0b6fd6; color: #0b3d78; font-weight: 700; }
+      #hpl .hpl-tecs .hpl-nota { margin: 0 0 0 6px; font-size: 11px; color: #6b7a8c; }
+      #hpl table.hpl-lista tr.tomada td { background: #fafafa; color: #8a97a8; }
+      #hpl table.hpl-lista tr.sep td { font-size: 11px; color: #6b7a8c; font-weight: 700; padding-top: 10px; border-bottom: 1px solid #dfe7f0; }
+      #hpl .quien { font-size: 11px; color: #b7791f; margin-right: 6px; }
     `;
     document.head.appendChild(s);
   }
@@ -384,15 +516,57 @@
   let datos = { filas: [], ts: 0 };
   let actualizando = false;
   let errorLectura = '';
+  let ultimaColaDias = null;  // se envía en el resumen diario del Sheet
+  let ultimaLista = [];       // tu lista de hoy (para el CSV)
 
   function render() {
     if (!datos.ts) { pintarCargando(); return; }
     const filas = aplicarBitacora(datos.filas, datos.ts);
-    const cfg = { ...CFG_DEF, ...leer(K.cfg, {}) };
+    const cfg = config();
+    const sync = syncActivo();
+    const yo = syncCfg().usuario;
+    // Equipo: personas conectadas en la última media hora (según el Sheet)
+    const activos = sync && remoto.ok ? Object.entries(remoto.activos || {}) : [];
+    const capNuevasEquipo = activos.length
+      ? activos.reduce((a, [, v]) => a + Math.max(0, (+v.cupoTotal || 0) - (+v.cupoSeg || 0)), 0)
+      : cfg.cupoTotal - cfg.cupoSeg;
+    cfg.capNuevas = capNuevasEquipo;
     const hoy = d0(new Date());
     const plan = planificar(filas, hoy, cfg);
     const reg = registrar(filas, plan, cfg);
-    const porOtst = {}; filas.forEach((f) => { porOtst[f.otst] = f; });
+    ultimaColaDias = habilesEntre(plan.inicioK, plan.ultimoSeg) + 1;
+    // Incluye las que ya salieron del estado (para mostrar sus datos en "hechas")
+    const infoBase = {}; datos.filas.forEach((f) => { infoBase[f.otst] = f; });
+
+    // ── Llamadas de hoy: bitácora (tuya y del equipo) + cambios vistos en el Libro ──
+    const hoyK = plan.hoyK;
+    const ultimaDe = {};
+    leer(K.log, []).forEach((e) => { if (e && e.otst && e.ts && clave(new Date(e.ts)) === hoyK) ultimaDe[e.otst] = e; });
+    reg.cambiadas.forEach((o) => { if (!ultimaDe[o]) ultimaDe[o] = { otst: o, accion: o in reg.actual ? 'reprogramada' : 'salio', sinRegistro: true }; });
+    // Sin Sheet todo lo hecho cuenta como tuyo; con Sheet, lo que no tiene registro no es de nadie
+    const esMia = (e) => (e.sinRegistro ? !sync : !e.usuario || e.usuario === yo);
+    const tipoIni = (o) => { const f = reg.ini.items[o]; return f == null ? 'nueva' : f < hoyK ? 'vencida' : f === hoyK ? 'hoy' : 'agendada'; };
+    const misHechas = Object.values(ultimaDe).filter(esMia);
+    const misSeg = misHechas.filter((e) => tipoIni(e.otst) !== 'nueva');
+    const misNue = misHechas.filter((e) => tipoIni(e.otst) === 'nueva');
+    const porPersona = {};
+    Object.values(ultimaDe).forEach((e) => { const n = e.sinRegistro ? 'sin registro' : e.usuario || yo || 'Tú'; porPersona[n] = (porPersona[n] || 0) + 1; });
+
+    // ── Tu lista: siguientes OTST libres de la cola compartida hasta completar tu cupo ──
+    const filtroTec = cfg.misTecnicos;
+    const deMisTec = (f) => !filtroTec.length || filtroTec.includes(f.tecnico);
+    const libre = (f) => !ultimaDe[f.otst] && !tomadaPorOtro(f.otst) && deMisTec(f);
+    const pendientesSeg = plan.seg.filter((f) => f.tipo !== 'agendada'); // vencidas + hoy, lo más atrasado primero
+    const pendSeg = pendientesSeg.filter(libre).slice(0, Math.max(0, cfg.cupoSeg - misSeg.length));
+    const cupoNuevasMias = cfg.cupoTotal - Math.min(cfg.cupoSeg, misSeg.length + pendSeg.length);
+    const pendNue = plan.nuevas.filter(libre).slice(0, Math.max(0, cupoNuevasMias - misNue.length));
+    const enLlamadaOtros = [...pendientesSeg, ...plan.nuevas].filter((f) => !ultimaDe[f.otst] && deMisTec(f) && tomadaPorOtro(f.otst));
+    const itemHecho = (e) => ({ otst: e.otst, tipo: tipoIni(e.otst), fechaIni: reg.ini.items[e.otst] || null, hecha: e });
+    const itemPend = (f) => ({ otst: f.otst, tipo: f.tipo, fechaIni: f.fecha });
+    const listaSeg = [...misSeg.map(itemHecho), ...pendSeg.map(itemPend)];
+    const listaNue = [...misNue.map(itemHecho), ...pendNue.map(itemPend)];
+    ultimaLista = [...listaSeg, ...listaNue];
+    const cupoNuevasTxt = Math.max(0, cupoNuevasMias);
 
     // Clientes con varias OTST abiertas (posible cierre de varias con una llamada)
     const porCliente = {};
@@ -403,17 +577,18 @@
     const nAg = plan.seg.filter((f) => f.tipo === 'agendada').length;
     const diasColaSeg = habilesEntre(plan.inicioK, plan.ultimoSeg) + 1;
     const diasColaNuevas = habilesEntre(plan.inicioK, plan.ultimoNuevas) + 1;
-    const hechas = reg.hechasSeg + reg.hechasNuevas;
+    const hechas = misHechas.length;
     const ent = entradasPromedio(reg.hist, filas);
-    const cupoNuevasHoy = cfg.cupoTotal - Math.min(cfg.cupoSeg, plan.carga[plan.inicioK] || 0);
+    const segEq = cfg.cupoSegEquipo;
 
     // Alertas
     const alertas = [];
-    const sobrecargados = Object.keys(plan.agenda).filter((k) => plan.agenda[k] > cfg.cupoSeg).sort();
-    if (nVenc) alertas.push(['rojo', `${nVenc} OTST vencidas. Con ${cfg.cupoSeg} seguimientos por día, la cola de seguimiento llega hasta el <b>${corta(plan.ultimoSeg)}</b> (${diasColaSeg} días hábiles).`]);
-    if (sobrecargados.length) alertas.push(['', `Días con más de ${cfg.cupoSeg} llamadas agendadas en la intranet: ${sobrecargados.map((k) => `<b>${corta(k)}</b> (${plan.agenda[k]})`).join(', ')}. El excedente se corre al siguiente día con cupo.`]);
-    if (ent.valor > cfg.cupoTotal - cfg.cupoSeg) alertas.push(['rojo', `Entran ~${ent.valor.toFixed(1)} OTST nuevas por día hábil${ent.estimado ? ' (estimado)' : ''} y el cupo de nuevas es ${cfg.cupoTotal - cfg.cupoSeg}: la lista de nuevas va a crecer aunque se cumpla la meta.`]);
-    if (diasColaNuevas > 1) alertas.push(['', `${plan.nuevas.length} OTST sin contacto: con ${cfg.cupoTotal - cfg.cupoSeg}+ por día se alcanzan a llamar todas en ${diasColaNuevas} días hábiles.`]);
+    const sobrecargados = Object.keys(plan.agenda).filter((k) => plan.agenda[k] > segEq).sort();
+    if (nVenc) alertas.push(['rojo', `${nVenc} OTST vencidas. Con ${segEq} seguimientos por día, la cola de seguimiento llega hasta el <b>${corta(plan.ultimoSeg)}</b> (${diasColaSeg} días hábiles).`]);
+    if (sobrecargados.length) alertas.push(['', `Días con más de ${segEq} llamadas agendadas en la intranet: ${sobrecargados.map((k) => `<b>${corta(k)}</b> (${plan.agenda[k]})`).join(', ')}. El excedente se corre al siguiente día con cupo.`]);
+    if (ent.valor > capNuevasEquipo) alertas.push(['rojo', `Entran ~${ent.valor.toFixed(1)} OTST nuevas por día hábil${ent.estimado ? ' (estimado)' : ''} y ${activos.length > 1 ? 'el equipo alcanza' : 'alcanzas'} a llamar ${capNuevasEquipo} nuevas por día: la lista de nuevas va a crecer aunque se cumpla la meta.`]);
+    if (diasColaNuevas > 1) alertas.push(['', `${plan.nuevas.length} OTST sin contacto: con ${capNuevasEquipo} por día se alcanzan a llamar todas en ${diasColaNuevas} días hábiles.`]);
+    if (sync && remoto.ok === false) alertas.unshift(['rojo', `No se pudo sincronizar con el Sheet: ${esc(remoto.error)}. La agenda sigue funcionando sola en este navegador.`]);
     const viejas = filas.filter((f) => f.dias >= cfg.alertaSemanas * 7).sort((a, b) => b.dias - a.dias);
     if (viejas.length) alertas.push(['', `${viejas.length} OTST con más de ${cfg.alertaSemanas} semanas en este estado: ${viejas.slice(0, 6).map((f) => `<a href="/stecnico/item/${f.otst}" target="hpl_otst">${f.otst}</a> (${Math.floor(f.dias / 7)} sem)`).join(', ')}${viejas.length > 6 ? '…' : ''}. Considera cierre o disposición final.`]);
     const multis = Object.entries(porCliente).filter(([, l]) => l.length > 1);
@@ -423,7 +598,7 @@
     // Gráfico de carga de los próximos días hábiles
     const dias = [];
     for (let d = deClave(plan.inicioK); dias.length < cfg.diasGrafico; d = sigHabil(d)) dias.push(clave(d));
-    const maxY = Math.max(cfg.cupoSeg + 2, ...dias.map((k) => Math.max(plan.carga[k] || 0, plan.agenda[k] || 0)));
+    const maxY = Math.max(segEq + 2, ...dias.map((k) => Math.max(plan.carga[k] || 0, plan.agenda[k] || 0)));
     const alto = (n) => `${(n / maxY) * 100}%`;
     const barras = dias.map((k) => {
       const enDia = plan.seg.filter((f) => f.plan === k);
@@ -431,7 +606,7 @@
       const movidas = enDia.length - propias;
       const intr = plan.agenda[k] || 0;
       return `<div class="hpl-col" title="${corta(k)}: ${enDia.length} planeadas (${propias} agendadas para ese día, ${movidas} vencidas o corridas)${intr ? ` · ${intr} agendadas en la intranet` : ''}">
-        ${intr > cfg.cupoSeg ? `<span class="intr">${intr}⚠</span>` : ''}
+        ${intr > segEq ? `<span class="intr">${intr}⚠</span>` : ''}
         <span class="num">${enDia.length || ''}</span>
         <div class="pila" style="height:${alto(enDia.length)}">
           <i style="height:${enDia.length ? (propias / enDia.length) * 100 : 0}%;background:#0b6fd6"></i>
@@ -454,48 +629,69 @@
       ? `<table class="hpl-lista"><tr><th>Día</th><th>Pendientes</th><th>Vencidas</th><th>Sin contacto</th><th>Entraron</th><th>Llamadas</th></tr>${hk.map((k) => { const h = reg.hist[k]; return `<tr><td>${corta(k)}</td><td>${h.total}</td><td>${h.vencidas}</td><td>${h.sinContacto}</td><td>${h.entradas ?? '–'}</td><td>${h.hechasSeg + h.hechasNuevas}</td></tr>`; }).join('')}</table>`
       : '<div class="hpl-nota">La tendencia aparece desde el segundo día de uso (el script toma una foto de la lista cada vez que abres el Libro de Trabajo).</div>';
 
-    // Lista del día (congelada en la primera carga del día)
-    const items = reg.lista.items.filter((it) => (pestana === 'seg' ? it.tipo !== 'nueva' : it.tipo === 'nueva'));
-    // Agrupar por cliente dentro de la lista (cada grupo queda donde aparece su primera OTST)
-    const cliDe = (it) => (porOtst[it.otst] ? porOtst[it.otst].cliente : `#${it.otst}`);
+    // Tabla de tu lista: hechas (✅) primero, luego pendientes agrupadas por cliente
+    const items = pestana === 'seg' ? listaSeg : listaNue;
+    const hechos = items.filter((it) => it.hecha);
+    const pend = items.filter((it) => !it.hecha);
+    const cliDe = (it) => (infoBase[it.otst] ? infoBase[it.otst].cliente : `#${it.otst}`);
     const primero = {};
-    items.forEach((it, i) => { if (!(cliDe(it) in primero)) primero[cliDe(it)] = i; });
-    const orden = items.map((it, i) => ({ it, i })).sort((a, b) => primero[cliDe(a.it)] - primero[cliDe(b.it)] || a.i - b.i).map((x) => x.it);
+    pend.forEach((it, i) => { if (!(cliDe(it) in primero)) primero[cliDe(it)] = i; });
+    const orden = [...hechos, ...pend.map((it, i) => ({ it, i })).sort((a, b) => primero[cliDe(a.it)] - primero[cliDe(b.it)] || a.i - b.i).map((x) => x.it)];
     const multiOtsts = new Set(multis.flatMap(([, l]) => l));
+    const etiquetaTipo = (tipo, fechaIni) => (tipo === 'vencida' ? `Vencida ${fechaIni ? corta(fechaIni) : ''}` : tipo === 'hoy' ? 'Hoy' : tipo === 'agendada' ? `Agendada ${fechaIni ? corta(fechaIni) : ''}` : 'Sin contacto');
+    const resultado = (e) => (e.accion === 'efectiva' ? 'Contacto efectivo' : e.accion === 'reprogramada' ? `Reprogramada${e.fecha ? ' → ' + corta(e.fecha) : ''}` : 'Salió del estado');
     let cliAnterior = null;
-    const filasLista = orden.map((it, i) => {
-      const f = porOtst[it.otst];
-      const cli = f ? f.cliente : '(ya no está en la lista)';
+    let n = 0;
+    const filaHtml = (it, extraClase, accionHtml) => {
+      const f = infoBase[it.otst];
+      const cli = f ? f.cliente : (it.hecha && it.hecha.cliente) || '';
       const otras = f ? (porCliente[f.cliente] || []).filter((o) => o !== it.otst) : [];
       const c = contactos[it.otst];
-      const etiqueta = it.tipo === 'vencida' ? `Vencida ${it.fechaIni ? corta(it.fechaIni) : ''}` : it.tipo === 'hoy' ? 'Hoy' : it.tipo === 'agendada' ? `Agendada ${corta(it.fechaIni)}` : 'Sin contacto';
-      const nuevoGrupo = cli !== cliAnterior && i > 0; cliAnterior = cli;
-      return `<tr class="${it.hecha ? 'hecha' : ''} ${nuevoGrupo && otras.length ? 'grupo' : ''}">
-        <td class="ok">${it.hecha ? '✅' : i + 1}</td>
+      const nuevoGrupo = cli !== cliAnterior && cliAnterior !== null; cliAnterior = cli;
+      return `<tr class="${extraClase} ${nuevoGrupo && otras.length && !it.hecha ? 'grupo' : ''}">
+        <td class="ok">${it.hecha ? '✅' : extraClase === 'tomada' ? '🔒' : ++n}</td>
         <td><a href="/stecnico/item/${it.otst}" target="hpl_otst">${it.otst}</a></td>
-        <td><span class="tag ${it.tipo}">${esc(etiqueta)}</span>${f && f.garantia ? ' <span class="tag gar">Garantía</span>' : ''}</td>
-        <td>${esc(cli)}${otras.length ? ` <span class="tag multi" title="Otras OTST abiertas de este cliente: ${otras.join(', ')}">+${otras.length} OTST: ${otras.join(', ')}</span>` : ''}
-          ${multiOtsts.has(it.otst) ? `<div class="contacto">${c ? (c.n ? '👤 ' + esc(c.n) : '👤 sin nombre') : '👤 consultando…'}</div>` : ''}</td>
+        <td><span class="tag ${it.tipo}">${esc(etiquetaTipo(it.tipo, it.fechaIni))}</span>${f && f.garantia ? ' <span class="tag gar">Garantía</span>' : ''}</td>
+        <td>${esc(cli)}${otras.length && !it.hecha ? ` <span class="tag multi" title="Otras OTST abiertas de este cliente: ${otras.join(', ')}">+${otras.length} OTST: ${otras.join(', ')}</span>` : ''}
+          ${multiOtsts.has(it.otst) && !it.hecha ? `<div class="contacto">${c ? (c.n ? '👤 ' + esc(c.n) : '👤 sin nombre') : '👤 consultando…'}</div>` : ''}</td>
         <td>${f ? esc(f.tiempo) : ''}</td>
-        <td>${f ? esc(f.tecnico) : ''}</td>
-        <td>${it.hecha ? (f ? 'Reprogramada' : 'Salió del estado') : `<a class="llamar" href="/stecnico/item/${it.otst}/diagnosiscall" target="hpl_otst">📞 Llamar</a>`}</td>
+        <td>${f ? esc(f.tecnico) : esc((it.hecha && it.hecha.tecnico) || '')}</td>
+        <td>${accionHtml}</td>
       </tr>`;
-    }).join('');
-    const nSegLista = reg.lista.items.filter((it) => it.tipo !== 'nueva').length;
-    const nNueLista = reg.lista.items.length - nSegLista;
+    };
+    const llamarHtml = (otst, texto) => `<a class="llamar" data-otst="${otst}" href="/stecnico/item/${otst}/diagnosiscall" target="hpl_otst">${texto}</a>`;
+    let filasLista = orden.map((it) => filaHtml(it, it.hecha ? 'hecha' : '', it.hecha ? esc(resultado(it.hecha)) : llamarHtml(it.otst, '📞 Llamar'))).join('');
+    const otrosTab = enLlamadaOtros.filter((f) => (pestana === 'seg' ? f.tipo !== 'nueva' : f.tipo === 'nueva'));
+    if (otrosTab.length) {
+      cliAnterior = null;
+      filasLista += `<tr class="sep"><td colspan="7">En llamada por otras personas ahora</td></tr>` + otrosTab.map((f) => {
+        const t = tomadaPorOtro(f.otst);
+        return filaHtml({ otst: f.otst, tipo: f.tipo, fechaIni: f.fecha }, 'tomada',
+          `<span class="quien">${esc(t.usuario)} · ${haceTexto(t.ts)}</span> ${llamarHtml(f.otst, 'Llamar igual')}`);
+      }).join('');
+    }
+
+    // Chips "Mis técnicos" (los técnicos que hoy tienen OTST en la lista)
+    const tecnicos = Object.entries(filas.reduce((a, f) => { if (f.tecnico) a[f.tecnico] = (a[f.tecnico] || 0) + 1; return a; }, {})).sort((a, b) => b[1] - a[1]);
+    const chipsTec = `<div class="hpl-tecs"><span class="t">Mis técnicos:</span>
+      <button type="button" data-tec="" class="${filtroTec.length ? '' : 'act'}">Todos</button>
+      ${tecnicos.map(([t, c]) => `<button type="button" data-tec="${esc(t)}" class="${filtroTec.includes(t) ? 'act' : ''}">${esc(t)} <small>${c}</small></button>`).join('')}
+      ${sync ? '<span class="hpl-nota">Las demás personas ven tus OTST en llamada (🔒) y no las toman.</span>' : ''}</div>`;
+    const equipoTxt = Object.keys(porPersona).length > 1 || (sync && activos.length > 1)
+      ? `<div class="l">Equipo hoy: ${Object.entries(porPersona).map(([p, c]) => `${esc(p)} ${c}`).join(' · ') || '0'}</div>` : '';
 
     const sugerida = deClave(plan.sugerida);
     const html = `
       <div class="hpl-top">
         <h3>📞 ${ES_AGENDA ? 'Agenda de llamadas' : 'Planificador de llamadas'}</h3>
-        <span class="hpl-sub">${esc(corta(plan.hoyK))} · cupo ${cfg.cupoTotal} diarias = máx. ${cfg.cupoSeg} de seguimiento + ${cfg.cupoTotal - cfg.cupoSeg} nuevas · fecha sugerida para reprogramar: <b>${pad(sugerida.getDate())}/${pad(sugerida.getMonth() + 1)}/${sugerida.getFullYear()}</b> · v${VERSION}</span>
+        <span class="hpl-sub">${esc(corta(plan.hoyK))}${yo ? ` · ${esc(yo)}` : ''} · tu cupo ${cfg.cupoTotal}/día (máx. ${cfg.cupoSeg} de seguimiento) · reprogramar: ${segEq} por día · fecha sugerida: <b>${pad(sugerida.getDate())}/${pad(sugerida.getMonth() + 1)}/${sugerida.getFullYear()}</b> · v${VERSION}</span>
         ${botonesTop()}
       </div>
       <div class="hpl-body">
         <div class="hpl-kpis">
-          <div class="hpl-kpi ${hechas >= cfg.cupoTotal ? 'verde' : ''}"><div class="v">${hechas}/${cfg.cupoTotal}</div><div class="l">Llamadas hoy (${reg.hechasSeg} seguimiento · ${reg.hechasNuevas} nuevas)</div><div class="hpl-barra"><i style="width:${Math.min(100, (hechas / cfg.cupoTotal) * 100)}%"></i></div></div>
+          <div class="hpl-kpi ${hechas >= cfg.cupoTotal ? 'verde' : ''}"><div class="v">${hechas}/${cfg.cupoTotal}</div><div class="l">${sync ? 'Mis llamadas' : 'Llamadas'} hoy (${misSeg.length} seguimiento · ${misNue.length} nuevas)</div>${equipoTxt}<div class="hpl-barra"><i style="width:${Math.min(100, (hechas / cfg.cupoTotal) * 100)}%"></i></div></div>
           <div class="hpl-kpi ${nVenc ? 'rojo' : 'verde'}"><div class="v">${nVenc}</div><div class="l">Vencidas</div></div>
-          <div class="hpl-kpi ${nHoy > cfg.cupoSeg ? 'ambar' : ''}"><div class="v">${nHoy}</div><div class="l">Agendadas para hoy</div></div>
+          <div class="hpl-kpi ${nHoy > segEq ? 'ambar' : ''}"><div class="v">${nHoy}</div><div class="l">Agendadas para hoy</div></div>
           <div class="hpl-kpi"><div class="v">${plan.nuevas.length}</div><div class="l">Sin contacto (nuevas)</div></div>
           <div class="hpl-kpi"><div class="v">${nAg}</div><div class="l">Agendadas a futuro</div></div>
           <div class="hpl-kpi ${diasColaSeg > 5 ? 'rojo' : diasColaSeg > 2 ? 'ambar' : 'verde'}"><div class="v">${diasColaSeg} d</div><div class="l">Cola de seguimiento (días hábiles, hasta ${corta(plan.ultimoSeg)})</div></div>
@@ -504,7 +700,7 @@
         <div class="hpl-grid2">
           <div class="hpl-card">
             <h4>Carga de seguimiento — próximos ${cfg.diasGrafico} días hábiles</h4>
-            <div class="hpl-chart">${barras}<div class="hpl-linea" style="bottom:${alto(cfg.cupoSeg)}"><span>cupo ${cfg.cupoSeg}</span></div></div>
+            <div class="hpl-chart">${barras}<div class="hpl-linea" style="bottom:${alto(segEq)}"><span>cupo ${segEq}</span></div></div>
             <div class="hpl-dias">${etiquetasDias}</div>
             <div class="hpl-leyenda"><span><b style="background:#0b6fd6"></b>Agendadas para ese día</span><span><b style="background:#e8913a"></b>Vencidas o corridas por falta de cupo</span><span style="color:#c0392b">N⚠ = agendadas en la intranet por encima del cupo</span></div>
           </div>
@@ -517,16 +713,15 @@
         <div class="hpl-card" style="margin-bottom:12px"><h4>Tendencia</h4>${tendencia}</div>
         <div class="hpl-card hpl-lista-card">
           <div class="hpl-tabs">
-            <button type="button" data-tab="seg" class="${pestana === 'seg' ? 'act' : ''}">Seguimiento de hoy (${nSegLista}/${cfg.cupoSeg})</button>
-            <button type="button" data-tab="nue" class="${pestana === 'nue' ? 'act' : ''}">Nuevas de hoy (${nNueLista}/${cupoNuevasHoy})</button>
-            <span class="sp"></span>
-            <button type="button" data-act="recalc" title="Vuelve a armar la lista de hoy con el estado actual">↻ Recalcular lista de hoy</button>
+            <button type="button" data-tab="seg" class="${pestana === 'seg' ? 'act' : ''}">Seguimiento de hoy (${misSeg.length} hechas · cupo ${cfg.cupoSeg})</button>
+            <button type="button" data-tab="nue" class="${pestana === 'nue' ? 'act' : ''}">Nuevas de hoy (${misNue.length} hechas · cupo ${cupoNuevasTxt})</button>
           </div>
+          ${chipsTec}
           <table class="hpl-lista">
             <tr><th>#</th><th>OTST</th><th>Tipo</th><th>Cliente</th><th>Tiempo</th><th>Técnico</th><th></th></tr>
-            ${filasLista || '<tr><td colspan="7">No hay llamadas en esta lista.</td></tr>'}
+            ${filasLista || `<tr><td colspan="7">${filtroTec.length ? 'No quedan OTST pendientes de tus técnicos en esta lista.' : 'No hay llamadas pendientes en esta lista.'}</td></tr>`}
           </table>
-          <div class="hpl-nota">La lista se arma con la primera carga del día; ✅ = la OTST ya cambió de fecha o salió del estado. Seguimiento: lo más atrasado primero. Nuevas: las de mayor antigüedad primero.</div>
+          <div class="hpl-nota">Tu lista toma las siguientes OTST libres de la cola hasta completar tu cupo: seguimiento, lo más atrasado primero; nuevas, la de mayor antigüedad primero. ✅ = llamada hecha hoy (registrada al dar Continuar, o vista en el Libro de Trabajo)${sync ? '; 🔒 = otra persona la está llamando' : ''}.</div>
         </div>
       </div>`;
 
@@ -546,7 +741,9 @@
            <a class="hpl-btn" href="${URL_LIBRO}" target="_blank" title="Abre el Libro de Trabajo completo (lento)">Libro de Trabajo</a>`
         : `<a class="hpl-btn" href="${URL_AGENDA}" title="Abre la agenda rápida: carga al instante y se actualiza sola">⚡ Agenda rápida</a>`}
       <button type="button" data-act="csv" title="Descarga la lista de hoy en CSV (para Excel)">⬇ CSV de hoy</button>
-      <button type="button" data-act="cfg" title="Cambiar cupos">⚙️ Cupos</button>`;
+      <button type="button" data-act="cfg" title="Cambiar cupos">⚙️ Cupos</button>
+      <button type="button" data-act="sync" title="Conectar con el Google Sheet (indicadores y llamar entre varias personas)">☁ Sheets</button>
+      <span id="hpl-sync" class="hpl-sync"></span>`;
   }
 
   function montarPanel() {
@@ -591,6 +788,18 @@
     else if (errorLectura) el.textContent = `⚠ ${errorLectura}`;
     else if (ES_AGENDA && datos.ts) el.textContent = `Datos ${haceTexto(datos.ts)}`;
     else el.textContent = '';
+    const s = document.getElementById('hpl-sync');
+    if (!s) return;
+    if (!syncActivo()) { s.className = 'hpl-sync'; s.textContent = ''; s.title = ''; return; }
+    const yo = syncCfg().usuario;
+    const otros = Object.keys(remoto.activos || {}).filter((n) => n !== yo);
+    if (remoto.ok === true) {
+      s.className = 'hpl-sync ok';
+      s.textContent = `🟢 ${otros.length ? 'En línea con ' + otros.join(', ') : 'En línea'}`;
+      s.title = `Sincronizado con el Sheet ${haceTexto(remoto.ts)} como "${yo}"`;
+    } else if (remoto.ok === false) {
+      s.className = 'hpl-sync error'; s.textContent = '🔴 Sin Sheet'; s.title = remoto.error;
+    } else { s.className = 'hpl-sync'; s.textContent = '⏳ Conectando…'; s.title = ''; }
   }
 
   // ─────────────────────────────────────────────
@@ -622,8 +831,8 @@
   }
 
   function exportarCSV() {
-    const lista = leer(K.listaHoy, null);
-    if (!lista || !lista.items.length) return;
+    const lista = { fecha: clave(new Date()), items: ultimaLista };
+    if (!lista.items.length) return;
     const info = {};
     datos.filas.forEach((f) => { info[f.otst] = f; });
     const fecha = (k) => (k ? k.split('-').reverse().join('/') : '');
@@ -632,7 +841,7 @@
     const filas = [['OTST', 'Cliente', 'Técnico Asignado', '¿En garantía?', 'Tipo', 'Fecha próximo contacto', 'Estado']];
     lista.items.forEach((it) => {
       const f = info[it.otst] || {};
-      filas.push([it.otst, f.cliente || '', f.tecnico || '', f.garantia ? 'SI' : 'NO', tipo[it.tipo] || it.tipo, fecha(it.fechaIni), it.hecha ? 'Hecha' : 'Pendiente']);
+      filas.push([it.otst, f.cliente || '', f.tecnico || '', f.garantia ? 'SI' : 'NO', tipo[it.tipo] || it.tipo, fecha(it.fechaIni), it.hecha ? (it.hecha.accion === 'efectiva' ? 'Efectiva' : it.hecha.accion === 'reprogramada' ? `Reprogramada ${fecha(it.hecha.fecha)}`.trim() : 'Salió del estado') : 'Pendiente']);
     });
     const csv = '﻿' + filas.map((r) => r.map((v) => q(String(v))).join(',')).join('\r\n');
     const a = document.createElement('a');
@@ -645,21 +854,36 @@
   }
 
   function alClic(e) {
+    // Al abrir una llamada se avisa al Sheet para que nadie más la tome (sin frenar el enlace)
+    const ll = e.target.closest('a.llamar[data-otst]');
+    if (ll) { sincronizar({ tomar: ll.dataset.otst }); return; }
     const b = e.target.closest('button, .hpl-top');
     if (!b) return;
     if (b.dataset.tab) { pestana = b.dataset.tab; render(); return; }
-    if (b.dataset.act === 'recalc') { localStorage.removeItem(K.listaHoy); render(); return; }
+    if ('tec' in b.dataset) {
+      const c = leer(K.cfg, {});
+      const t = b.dataset.tec;
+      let mis = Array.isArray(c.misTecnicos) ? c.misTecnicos : [];
+      mis = !t ? [] : mis.includes(t) ? mis.filter((x) => x !== t) : [...mis, t];
+      guardar(K.cfg, { ...c, misTecnicos: mis });
+      render();
+      sincronizar();
+      return;
+    }
+    if (b.dataset.act === 'sync') { configurarSync(); return; }
     if (b.dataset.act === 'actualizar') { actualizarDesdeLibro(); return; }
     if (b.dataset.act === 'csv') { exportarCSV(); return; }
     if (b.dataset.act === 'cfg') {
       const cfg = { ...CFG_DEF, ...leer(K.cfg, {}) };
-      const total = parseInt(prompt('Llamadas por día (cupo total):', cfg.cupoTotal), 10);
+      const total = parseInt(prompt('TUS llamadas por día (cupo total de esta persona):', cfg.cupoTotal), 10);
       if (!total) return;
-      const seg = parseInt(prompt('Máximo de seguimientos (vencidas/reprogramadas) por día:', cfg.cupoSeg), 10);
-      if (!seg) return;
-      guardar(K.cfg, { ...leer(K.cfg, {}), cupoTotal: total, cupoSeg: Math.min(seg, total) });
-      localStorage.removeItem(K.listaHoy);
+      const seg = parseInt(prompt('De esas, máximo de seguimientos (vencidas/reprogramadas) que haces tú por día:', cfg.cupoSeg), 10);
+      if (isNaN(seg) || seg < 0) return;
+      const eq = parseInt(prompt('Máximo de llamadas a reprogramar por día para TODO el equipo (lo que se agenda en la intranet):', cfg.cupoSegEquipo), 10);
+      if (!eq) return;
+      guardar(K.cfg, { ...leer(K.cfg, {}), cupoTotal: total, cupoSeg: Math.min(seg, total), cupoSegEquipo: eq });
       render();
+      sincronizar();
       return;
     }
     // Plegar/desplegar el panel (solo en el Libro de Trabajo)
@@ -675,7 +899,18 @@
   // Cuando llamada-seguimiento.user.js registra una llamada (en otra pestaña),
   // se refleja al instante. Solo se escucha la bitácora: el plan lo reescriben
   // ambas pestañas y escucharlo haría un ping-pong.
-  window.addEventListener('storage', (e) => { if (e.key === K.log && datos.ts) render(); });
+  window.addEventListener('storage', (e) => {
+    if (e.key !== K.log) return;
+    if (datos.ts) render();
+    sincronizar(); // envía al Sheet la llamada que se acaba de registrar
+  });
+
+  // Sincronización periódica con el Sheet (solo con la pestaña visible)
+  function iniciarSync() {
+    sincronizar();
+    setInterval(() => { if (document.visibilityState === 'visible') sincronizar(); }, SYNC_CADA_MS);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sincronizar(); });
+  }
 
   function iniciarLibro() {
     const t = tablaLlamadas();
@@ -684,6 +919,7 @@
     // Los datos son del momento en que se pidió la página
     guardarLectura(leerFilas(t), Math.round(performance.timeOrigin || Date.now()));
     render();
+    iniciarSync();
     return true;
   }
 
@@ -693,6 +929,7 @@
     if (g && Array.isArray(g.filas) && g.ts) datos = g;
     render();
     if (Date.now() - datos.ts > ACTUALIZAR_AL_VOLVER_MS) actualizarDesdeLibro();
+    iniciarSync();
     // Cada minuto: refresca el "hace X min" y, si toca, vuelve a leer el Libro
     setInterval(() => {
       pintarEstado();
@@ -706,6 +943,7 @@
     });
   }
 
+  localStorage.removeItem('hanna_pl_lista_hoy'); // lista congelada de v1.1 (ya no se usa)
   if (ES_AGENDA) iniciarAgenda();
   else if (!iniciarLibro()) {
     let intentos = 0;

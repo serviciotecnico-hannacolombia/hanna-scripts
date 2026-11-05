@@ -18,7 +18,7 @@ Instala solo los que uses — cada uno vive en su propia página de la intranet 
 | **Autocompletar Cotización SGV** | `.../sgv/ingresos/cotizaciones/crear` | Llena Fecha Primer Seguimiento (+2 días hábiles) y Fecha Cierre (+2 meses, ajustada a día hábil), agrega el comentario de la OTST relacionada si aplica, y completa "Información de Aplicación" con un texto por defecto. Solo llena campos vacíos. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/cotizacion-sgv.user.js) |
 | **Entrega de Solución SACI** | `regional.hannacolombia.com/saci/item/*/solucion_entrega` | Botón "Cargar solución de calibración": pide el link de seguimiento (`https://servicio.tecnico.hannacolombia.com/calibraciones/<código>`, o solo el código) y llena "Observaciones" con el mensaje estándar de entrega con ese link. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/saci-entrega-solucion.user.js) |
 | **Guardar Contacto en Google Contacts** | `.../stecnico/item/N` (solo detalle de la OT) | Resalta cada teléfono del contacto en la OT y revisa número por número si ya está guardado (gris "Buscando…" → verde con el primer nombre, o amarillo "No guardado"); al hacer clic ("Crear contacto") abre un cuadro de confirmación editable y, al aceptar, crea el contacto en Google Contacts con etiqueta "Client" y foto aleatoria, sin duplicar. Nombre, apellido y empresa siempre en MAYÚSCULAS. Requiere un Apps Script propio (ver sección abajo). | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/contactos-google.user.js) |
-| **Planificador de Llamadas** | `.../stecnico/libro_trabajo` y `.../stecnico/agenda-llamadas` | **Agenda rápida** (abre al instante y se actualiza sola en segundo plano) + panel sobre "Esperando Llamada Seguimiento Diagnóstico": lista del día con cupo (40 = máx. 10 de seguimiento + nuevas sin contacto), carga de los próximos días hábiles (con festivos de Colombia), alertas, antigüedad, tendencia y avance del día. Solo lee la página. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/planificador-llamadas.user.js) |
+| **Planificador de Llamadas** | `.../stecnico/libro_trabajo` y `.../stecnico/agenda-llamadas` | **Agenda rápida** (abre al instante y se actualiza sola en segundo plano) + panel sobre "Esperando Llamada Seguimiento Diagnóstico": lista del día con cupo (40 = máx. 10 de seguimiento + nuevas sin contacto), carga de los próximos días hábiles (con festivos de Colombia), alertas, antigüedad, tendencia y avance del día. Opcional: **☁ Sheets** para indicadores en Google Sheets y **llamar entre varias personas a la vez** (cola compartida, filtro por técnico). | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/planificador-llamadas.user.js) |
 | **Llamada de Seguimiento Diagnóstico** | `.../stecnico/item/*/diagnosiscall` | Deja "Contactar nuevamente" por defecto, calendario siempre abierto con festivos y la carga de cada día (verde/amarillo/rojo), sugiere el primer día con cupo, mensajes rápidos y confirmación antes de cerrar la comunicación. Nunca presiona Continuar. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/llamada-seguimiento.user.js) |
 
 ## Instalación (una sola vez, por persona, por cada script)
@@ -441,14 +441,15 @@ Si cambias el código del Apps Script: **Implementar → Administrar implementac
 
 ## Planificador de Llamadas + Llamada de Seguimiento
 
-Los dos scripts trabajan juntos (comparten el almacenamiento del navegador en la intranet; no se sube nada a ningún lado):
+Los dos scripts trabajan juntos (comparten el almacenamiento del navegador en la intranet). Sin configurar nada no se sube nada a ningún lado; con **☁ Sheets** las llamadas se guardan además en un Google Sheet (ver abajo):
 
 1. **Planificador** (Libro de Trabajo): cada vez que lo abres toma una foto de *Esperando Llamada Seguimiento Diagnóstico* y arma el plan:
    - **Seguimiento** (vencidas + agendadas): máx. **10 por día hábil**, lo más atrasado primero. Si un día ya tiene 10, el excedente se corre al siguiente día con cupo.
    - **Nuevas** (sin fecha de próximo contacto): el resto del cupo diario (40 − seguimientos), de la más antigua a la más reciente.
-   - La **lista de hoy** se congela con la primera carga del día; cada OTST que cambia de fecha o sale del estado queda con ✅ y suma al avance.
+   - **Tu lista de hoy** toma las siguientes OTST libres de la cola hasta completar tu cupo (lo que ya llamaste queda con ✅ arriba). Cada OTST que cambia de fecha o sale del estado suma al avance.
    - Las OTST de clientes con varias abiertas muestran el nombre del contacto (se consulta la OTST en segundo plano) para saber si una sola llamada sirve para todas.
-   - ⚙️ **Cupos** cambia el total diario y el máximo de seguimientos.
+   - ⚙️ **Cupos**: tus llamadas por día, cuántas de ellas son de seguimiento, y el máximo de reprogramaciones por día de todo el equipo (lo que se agenda en la intranet, por defecto 10).
+   - **Mis técnicos**: chips con los técnicos de la columna *Técnico*. Marca los tuyos y tu lista solo toma sus OTST ("yo llamo los de Germán, tú los de Wilfor"). *Todos* quita el filtro.
 2. **Llamada de Seguimiento** (`.../diagnosiscall`): pinta cada día del calendario según la carga planeada (verde con cupo, amarillo casi lleno, rojo lleno), tacha los festivos, propone la fecha **Sugerida** y avisa si eliges un día lleno. Al dar Continuar suma esa llamada a la carga del día elegido, para que la siguiente sugerencia ya la cuente.
 
 La tendencia y el promedio de OTST que entran por día se vuelven exactos con unos días de uso (antes se estiman con la columna *Tiempo*).
@@ -462,7 +463,32 @@ El Libro de Trabajo tarda ~6 s (arma llamadas, cotizaciones y pedidos a la vez).
 - **📞 Llamar** y el número de OTST abren siempre la misma pestaña secundaria (no se acumulan pestañas).
 - Al dar **Continuar** en la llamada (con *Llamada de Seguimiento* instalado), la OTST queda ✅ en la agenda **al instante**, sin esperar la siguiente lectura del Libro.
 - **⬇ CSV de hoy** descarga la lista del día con las columnas `OTST, Cliente, Técnico Asignado, ¿En garantía?` (SI/NO) + `Tipo, Fecha próximo contacto, Estado`, lista para Excel.
-- Todo se guarda en el navegador (localStorage de la intranet); no se sube nada.
+- Sin ☁ Sheets todo se guarda en el navegador (localStorage de la intranet).
+
+### ☁ Sheets: indicadores y varias personas llamando a la vez (opcional)
+
+Con el Apps Script `agenda-llamadas.gs` la agenda guarda cada llamada en un Google Sheet y se coordina con las demás personas:
+
+- **Cola compartida en tiempo casi real** (cada 20 s y al volver a la pestaña): lo que llama otra persona sale de tu lista y aparece ✅ en el avance del equipo.
+- Al dar **📞 Llamar** la OTST queda **🔒 en llamada** con tu nombre para los demás (se libera sola a los 20 min o al registrar la llamada). Debajo de tu lista ves las que otros están llamando, con **Llamar igual** por si hace falta.
+- Arriba: **🟢 En línea con …** (quién está conectado) o **🔴 Sin Sheet** si falla (la agenda sigue funcionando sola).
+- El cupo es **por persona** (⚙️ Cupos en cada navegador); la proyección de nuevas suma el cupo de todas las personas conectadas.
+- En el Sheet:
+  - **Bitácora**: una fila por llamada (fecha y hora, persona, OTST, Efectiva/Reprogramada, próximo contacto, tipo, cliente, técnico).
+  - **Resumen diario**: el estado de la cola cada día (pendientes, vencidas, sin contacto, entraron, llamadas, días de cola) + gráfico.
+  - **Indicadores**: llamadas por día y persona, resultado por persona y por técnico, llamadas por tipo, OTST con más intentos.
+
+**Preparación (una sola vez, la hace una persona):**
+
+1. Crea un Google Sheet nuevo, por ejemplo *Agenda de llamadas — Servicio Técnico*, y compártelo con quien deba ver los indicadores.
+2. En el Sheet: **Extensiones → Apps Script**. Borra lo que haya y pega el contenido de `agenda-llamadas.gs`.
+3. **Configuración del proyecto (⚙) → Propiedades del script → Agregar**: `CLAVE` = una clave secreta larga que te inventes.
+4. Arriba elige la función **configurar** y dale **▶ Ejecutar** (acepta los permisos). Crea las hojas Bitácora, Resumen diario e Indicadores.
+5. **Implementar → Nueva implementación → Aplicación web**: *Ejecutar como*: Yo · *Quién tiene acceso*: Cualquier usuario. Copia la URL que termina en `/exec` (abierta en el navegador debe mostrar `"version":"1.0"`).
+
+**Cada persona:** en la Agenda de llamadas → **☁ Sheets** → pega la URL, la CLAVE y escribe su nombre (así la ven los demás). Para desconectarte deja la URL vacía. Tampermonkey pedirá permiso para conectarse a `script.google.com` la primera vez: elige *Permitir siempre*.
+
+Si cambias el Apps Script: **Implementar → Administrar implementaciones → editar → Versión nueva** (la URL no cambia).
 
 ## Cuando hagas un cambio
 
