@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Panel de Control Intranet Hanna
 // @namespace    http://tampermonkey.net/
-// @version      16.20
+// @version      17.0
 // @description  Panel completo: Mediciones/Soluciones/Plantillas de Diagnóstico 100% dinámicas desde Google Sheets, marcador de resultado (✔/✘/Inestable), y plantillas de Diagnóstico Preliminar por tipo de equipo desde GitHub
 // @author       Brayan Galeano
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosis
@@ -14,7 +14,7 @@
     'use strict';
 
     // Debe coincidir siempre con @version del header de arriba.
-    var APP_VERSION = '16.20';
+    var APP_VERSION = '17.0';
 
     var columnasPorFilaLecturas = 3;
 
@@ -1563,12 +1563,75 @@
     // ─────────────────────────────────────────────
     var VOID_ELEMENTS_HTML = { br: true, hr: true, img: true };
 
+    // Etiquetas que el sistema reconoce al generar el informe. Cualquier otra
+    // (p.ej. un <mrak> mal escrito) se marca como error: abre y cierra bien,
+    // pero el informe no la resalta.
+    var NOMBRES_ETIQUETAS_HTML = ['b', 'i', 'u', 's', 'mark', 'strong', 'em', 'span', 'font', 'p', 'div',
+        'br', 'hr', 'small', 'sub', 'sup', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'img', 'a'];
+    var ETIQUETAS_CONOCIDAS_HTML = {};
+    NOMBRES_ETIQUETAS_HTML.forEach(function(n) { ETIQUETAS_CONOCIDAS_HTML[n] = true; });
+
+    // Un "b>" o "/mark>" suelto en el texto casi siempre es una etiqueta a la
+    // que se le borró el "<"; se limita a nombres conocidos (y, si hay un
+    // espacio, a que siga un atributo con "=") para no marcar textos como
+    // "V > 5" o "a > b".
+    var REGEX_TAG_SIN_APERTURA = new RegExp('(^|[^a-zA-Z0-9<])(\\/?(?:' + NOMBRES_ETIQUETAS_HTML.join('|') +
+        ')(?:\\s[^<>=]*=[^<>]*)?\\/?>)', 'gi');
+
+    function agregarTokensDeTexto(tokens, texto, inicio, fin) {
+        var segmento = texto.slice(inicio, fin);
+        var cursor = 0;
+        var m;
+        REGEX_TAG_SIN_APERTURA.lastIndex = 0;
+        while ((m = REGEX_TAG_SIN_APERTURA.exec(segmento)) !== null) {
+            var desde = m.index + m[1].length;
+            if (desde > cursor) {
+                tokens.push({ tipo: 'text', texto: segmento.slice(cursor, desde), inicio: inicio + cursor, fin: inicio + desde });
+            }
+            var hasta = desde + m[2].length;
+            tokens.push({ tipo: 'error', motivo: 'Falta el "<" que abre una etiqueta', texto: m[2], inicio: inicio + desde, fin: inicio + hasta });
+            cursor = hasta;
+        }
+        if (cursor < segmento.length) {
+            tokens.push({ tipo: 'text', texto: segmento.slice(cursor), inicio: inicio + cursor, fin: fin });
+        }
+    }
+
+    // Busca el ">" que cierra la etiqueta que empieza en "i", saltando los
+    // ">" que van dentro del valor entre comillas de un atributo (p.ej.
+    // title="a>b"). Si una comilla no se cierra antes del siguiente "<" o
+    // salto de línea, se usa el primer ">" sin más: así la comilla abierta
+    // la reporta validarTagHTML en vez de tragarse el resto del texto.
+    function buscarCierreTagHTML(texto, i) {
+        var comilla = null;
+        var ultimoNoEspacio = '';
+        for (var j = i + 1; j < texto.length; j++) {
+            var c = texto.charAt(j);
+            if (comilla) {
+                if (c === comilla) {
+                    comilla = null;
+                    ultimoNoEspacio = c;
+                } else if (c === '<' || c === '\n') {
+                    return texto.indexOf('>', i);
+                }
+                continue;
+            }
+            if (c === '>') return j;
+            if (c === '<') return texto.indexOf('>', i);
+            if ((c === '"' || c === "'") && ultimoNoEspacio === '=') {
+                comilla = c;
+            }
+            if (!/\s/.test(c)) ultimoNoEspacio = c;
+        }
+        return texto.indexOf('>', i);
+    }
+
     function tokenizarHTML(texto) {
         var tokens = [];
         var i = 0;
         while (i < texto.length) {
             if (texto.charAt(i) === '<') {
-                var cierre = texto.indexOf('>', i);
+                var cierre = buscarCierreTagHTML(texto, i);
                 var siguienteApertura = texto.indexOf('<', i + 1);
                 if (cierre === -1 || (siguienteApertura !== -1 && siguienteApertura < cierre)) {
                     var fin = siguienteApertura !== -1 ? siguienteApertura : texto.length;
@@ -1581,7 +1644,7 @@
             } else {
                 var next = texto.indexOf('<', i);
                 var end = next === -1 ? texto.length : next;
-                tokens.push({ tipo: 'text', texto: texto.slice(i, end), inicio: i, fin: end });
+                agregarTokensDeTexto(tokens, texto, i, end);
                 i = end;
             }
         }
@@ -1596,7 +1659,9 @@
         var pila = [];
         var problemas = [];
         tagTokens.forEach(function(t) {
-            var m = t.texto.match(/^<(\/?)([a-zA-Z][a-zA-Z0-9]*)/);
+            // Se toleran espacios tras "<" ("< b>") para que ese error lo
+            // reporte solo validarTagHTML, sin un "</b> sin apertura" extra.
+            var m = t.texto.match(/^<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9]*)/);
             if (!m) return;
             var esCierre = m[1] === '/';
             var nombre = m[2].toLowerCase();
@@ -1606,15 +1671,25 @@
                 for (var k = pila.length - 1; k >= 0; k--) {
                     if (pila[k].nombre === nombre) { idx = k; break; }
                 }
-                if (idx === pila.length - 1) {
-                    pila.pop();
-                } else if (idx > -1) {
-                    for (var r = pila.length - 1; r > idx; r--) {
-                        problemas.push('Falta cerrar <' + pila[r].nombre + '> (línea ' + numeroDeLineaHTML(texto, pila[r].pos) + ')');
-                    }
-                    pila.length = idx;
-                } else {
+                // OJO: con la pila vacía idx y pila.length - 1 valen ambos -1,
+                // así que el caso "sin apertura" debe revisarse primero.
+                if (idx === -1) {
                     problemas.push('</' + nombre + '> sin apertura (línea ' + numeroDeLineaHTML(texto, t.inicio) + ')');
+                } else if (idx === pila.length - 1) {
+                    var cerrada = pila.pop();
+                    if (cerrada.cruzadaCon) {
+                        problemas.push('</' + cerrada.cruzadaCon.nombre + '> se cerró antes que <' + nombre +
+                            '>: deben cerrarse en orden inverso (línea ' + numeroDeLineaHTML(texto, cerrada.cruzadaCon.pos) + ')');
+                    }
+                } else {
+                    // Etiquetas cruzadas (<b><mark>x</b></mark>): se saca solo
+                    // la que se cerró y las de adentro siguen abiertas. El
+                    // aviso de "orden" sale una sola vez, cuando se cierra la
+                    // más interna; si nunca se cierra, queda el aviso de
+                    // "nunca se cierra".
+                    var interna = pila[pila.length - 1];
+                    if (!interna.cruzadaCon) interna.cruzadaCon = { nombre: nombre, pos: t.inicio };
+                    pila.splice(idx, 1);
                 }
             } else if (!autoCerrada) {
                 pila.push({ nombre: nombre, pos: t.inicio });
@@ -1626,11 +1701,51 @@
         return problemas;
     }
 
-    // Revisa las comillas de los atributos de una etiqueta de apertura, p.ej.
+    // Revisa el CSS de un atributo style, p.ej. "backgroud-color: orange"
+    // (propiedad mal escrita), "background-color: orangee" (valor que no
+    // existe) o "background-color orange" (falta el ":"). El navegador
+    // descarta esas reglas en silencio y el resaltado no sale en el informe.
+    // CSS.supports hace la validación real, sin listas de propiedades a mano.
+    function validarEstiloCSS(estilo, nombre) {
+        var reglas = estilo.split(';');
+        for (var k = 0; k < reglas.length; k++) {
+            var regla = reglas[k].trim();
+            if (!regla) continue;
+            var dosPuntos = regla.indexOf(':');
+            if (dosPuntos === -1) {
+                return 'Falta el ":" en "' + regla + '" (style de <' + nombre + '>)';
+            }
+            var propiedad = regla.slice(0, dosPuntos).trim().toLowerCase();
+            var valor = regla.slice(dosPuntos + 1).replace(/!\s*important\s*$/i, '').trim();
+            if (!propiedad || !valor) {
+                return 'Regla CSS incompleta "' + regla + '" (style de <' + nombre + '>)';
+            }
+            if (typeof CSS === 'undefined' || typeof CSS.supports !== 'function') continue;
+            if (!CSS.supports(propiedad, 'initial')) {
+                return 'Propiedad CSS desconocida "' + propiedad + '" (style de <' + nombre + '>)';
+            }
+            if (!CSS.supports(propiedad, valor)) {
+                return 'Valor no válido "' + valor + '" para ' + propiedad + ' (style de <' + nombre + '>)';
+            }
+        }
+        return null;
+    }
+
+    // Revisa una etiqueta completa ("<...>"): espacio de más tras "<",
+    // nombre que el sistema no reconoce, comillas de los atributos, p.ej.
     // <mark style=""background-color: orange;"> (comilla doble de más: el
-    // navegador lo lee como style="" y el color se pierde sin ningún aviso).
+    // navegador lo lee como style="" y el color se pierde sin ningún aviso),
+    // y el CSS del style.
     // Devuelve la descripción del primer problema, o null si está bien.
-    function validarAtributosTag(tagTexto) {
+    function validarTagHTML(tagTexto) {
+        if (/^<\s+\/?\s*[a-zA-Z]/.test(tagTexto) || /^<\/\s+[a-zA-Z]/.test(tagTexto)) {
+            return 'Sobra un espacio en "' + tagTexto.replace(/\s+/g, ' ').slice(0, 12) + '": la etiqueta debe ir pegada al "<"';
+        }
+        // Solo en la apertura: así un <mrak>...</mrak> da un aviso, no dos.
+        var mNombre = tagTexto.match(/^<([a-zA-Z][a-zA-Z0-9]*)/);
+        if (mNombre && !ETIQUETAS_CONOCIDAS_HTML[mNombre[1].toLowerCase()]) {
+            return 'Etiqueta desconocida <' + mNombre[1] + '>: ¿está bien escrita?';
+        }
         var m = tagTexto.match(/^<([a-zA-Z][a-zA-Z0-9]*)([\s\S]*?)\/?>$/);
         if (!m) return null;
         var nombre = m[1].toLowerCase();
@@ -1672,13 +1787,19 @@
                 if (i < resto.length && !/[\s\/]/.test(resto.charAt(i))) {
                     return 'Comilla de más o falta un espacio en ' + atributo + ' de <' + nombre + '>';
                 }
+                var valorAtributo = resto.slice(j + 1, cierreComilla);
             } else {
                 var inicioValor = j;
                 while (j < resto.length && !/\s/.test(resto.charAt(j))) j++;
                 if (/["'=]/.test(resto.slice(inicioValor, j))) {
                     return 'Comillas mal puestas en ' + atributo + ' de <' + nombre + '>';
                 }
+                var valorAtributo = resto.slice(inicioValor, j);
                 i = j;
+            }
+            if (atributo.toLowerCase() === 'style') {
+                var problemaCSS = validarEstiloCSS(valorAtributo, nombre);
+                if (problemaCSS) return problemaCSS;
             }
         }
         return null;
@@ -1690,11 +1811,11 @@
         var problemas = validarBalanceHTML(tagTokens, texto);
         tokens.forEach(function(t) {
             if (t.tipo === 'error') {
-                problemas.push('Falta el ">" que cierra una etiqueta (línea ' + numeroDeLineaHTML(texto, t.inicio) + ')');
+                problemas.push((t.motivo || 'Falta el ">" que cierra una etiqueta') + ' (línea ' + numeroDeLineaHTML(texto, t.inicio) + ')');
             } else if (t.tipo === 'tag') {
-                var problemaAtributo = validarAtributosTag(t.texto);
-                if (problemaAtributo) {
-                    problemas.push(problemaAtributo + ' (línea ' + numeroDeLineaHTML(texto, t.inicio) + ')');
+                var problemaTag = validarTagHTML(t.texto);
+                if (problemaTag) {
+                    problemas.push(problemaTag + ' (línea ' + numeroDeLineaHTML(texto, t.inicio) + ')');
                 }
             }
         });
@@ -1724,7 +1845,7 @@
         var tokens = tokenizarHTML(texto);
         var html = '';
         tokens.forEach(function(t) {
-            if (t.tipo === 'tag' && validarAtributosTag(t.texto)) {
+            if (t.tipo === 'tag' && validarTagHTML(t.texto)) {
                 html += '<span style="background:#fbe4e2;text-decoration:underline wavy #b3261e;border-radius:2px;">' + resaltarTagHTML(t.texto) + '</span>';
             } else if (t.tipo === 'tag') {
                 html += '<span style="background:rgba(14,124,134,0.10);border-radius:2px;">' + resaltarTagHTML(t.texto) + '</span>';
