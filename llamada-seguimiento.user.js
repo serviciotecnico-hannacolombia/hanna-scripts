@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Llamada de Seguimiento Diagnóstico - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.5.0
+// @version      1.6.0
 // @description  En "Llamada de Seguimiento Diagnóstico" (OTST): deja por defecto "Contactar nuevamente, no fue posible establecer contacto", sugiere la fecha de próximo contacto (el primer día hábil con cupo según el Planificador de Llamadas; si no hay plan, hoy + 2 días hábiles) y muestra un calendario siempre abierto con atajos, festivos de Colombia y la carga de seguimientos de cada día. Si eliges "contacto efectivo" y das Continuar, pide confirmar que se cerrará la comunicación con la persona. Incluye mensajes rápidos guardables para la observación y llamada agrupada por cliente (encabezado "Orden relacionada con la OTST…"; las demás OTST del cliente se rellenan solas). Nunca presiona Continuar por ti.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosiscall*
@@ -214,6 +214,15 @@
       #ot-ls-grupo button:hover { background: #57319a; }
       #ot-ls-grupo .lg-nota { color: #6b7a8c; font-size: 11.5px; }
       #ot-ls-grupo .lg-ok { color: #2f855a; font-weight: 700; }
+      #ot-ls-grupo .lg-gar { background: #fff1c2; color: #8a6100; border-radius: 8px; padding: 0 6px; font-size: 11px; }
+      #ot-ls-grupo .lg-rec { margin-top: 5px; color: #4a2a85; }
+      #ot-ls-grupo .lg-rec a { font-weight: 700; }
+      #ot-ls-modal ul.ls-lista { list-style: none; margin: 0 0 16px; padding: 0; font-size: 14px; }
+      #ot-ls-modal ul.ls-lista li { padding: 6px 0; border-bottom: 1px solid #eef2f7; }
+      #ot-ls-modal ul.ls-lista li .ls-est { float: right; font-size: 12.5px; color: #6b7a8c; }
+      #ot-ls-modal ul.ls-lista li .ls-est.ok { color: #2f855a; font-weight: 700; }
+      #ot-ls-modal ul.ls-lista li .ls-est.mal { color: #c0392b; font-weight: 700; float: none; display: block; }
+      #ot-ls-modal.ancho { max-width: 560px; }
       #ot-ls-prio { margin: 4px 0 10px; padding: 8px 12px; border: 1px solid #f1b8b0; border-left: 4px solid #c0392b; border-radius: 8px; background: #fff8f6; font-family: Arial, sans-serif; font-size: 13px; color: #a52a1a; }
       #ot-ls-prio small { color: #6b7a8c; }
       #ot-ls-overlay { position: fixed; inset: 0; background: rgba(15,25,40,.55); z-index: 2147483000; display: flex; align-items: center; justify-content: center; }
@@ -493,7 +502,9 @@
     const info = {};
     (cli ? cli.filas : []).forEach((f) => { info[f.otst] = f; });
     const todas = ordenar([...Object.keys(info), ...(g ? g.otsts : []), otst]);
-    const marcadas = new Set(g ? g.otsts : todas);
+    // Garantía y no garantía se gestionan aparte: de entrada solo se marcan las del mismo tipo que esta
+    const garYo = !!(info[otst] && info[otst].garantia);
+    const marcadas = new Set(g ? g.otsts : todas.filter((o) => o === otst || !!(info[o] && info[o].garantia) === garYo));
     const cliente = (cli && cli.cliente) || '';
 
     caja.innerHTML = '';
@@ -511,6 +522,7 @@
       const sm = document.createElement('small');
       sm.textContent = o === otst ? `(esta${det ? ', ' + det : ''})` : det ? `(${det})` : '';
       l.append(c, ` ${o} `, sm);
+      if (f && f.garantia) { const gt = document.createElement('span'); gt.className = 'lg-gar'; gt.textContent = '🛡 garantía'; l.append(' ', gt); }
       c.addEventListener('change', pintar);
       cont.appendChild(l);
       return { c, l };
@@ -536,8 +548,17 @@
       } else {
         est.textContent = `¿Con esta llamada atiendes varias? Marca cuáles. El seguimiento queda en la mayor (${seg}); las demás se cierran. Esta OTST: ${accion}.`;
       }
+      if (otst !== seg && sel.length > 1) {
+        // Lo cómodo es registrar desde la mayor: ahí las demás se cierran solas
+        const rec = document.createElement('div'); rec.className = 'lg-rec';
+        const a = document.createElement('a'); a.href = `/stecnico/item/${seg}/diagnosiscall`; a.textContent = `abre la ${seg} ⭐`;
+        rec.append('💡 Más rápido: ', a, ' y regístrala allá; esta y las demás marcadas se cierran solas.');
+        est.append(rec);
+      }
       b.textContent = g ? 'Actualizar encabezado' : 'Insertar encabezado';
-      nota.textContent = `«${textoEncabezado(sel, seg)}» — escribe debajo lo que se habló. Al dar Continuar, el texto queda listo para las demás OTST del grupo.`;
+      nota.textContent = otst === seg
+        ? `«${textoEncabezado(sel, seg)}» — escribe debajo lo que se habló. Al dar Continuar, ${sel.length > 1 ? `las demás (${sel.filter((o) => o !== otst).join(', ')}) se cierran solas con «contacto efectivo» y este mismo texto` : 'se registra solo esta'}.`
+        : `«${textoEncabezado(sel, seg)}» — escribe debajo lo que se habló. Al dar Continuar, el texto queda listo para las demás OTST del grupo.`;
     }
     b.addEventListener('click', () => {
       const sel = elegidas();
@@ -580,6 +601,183 @@
     ref.parentNode.insertBefore(caja, ref);
     if (g) prellenarGrupo(select, area, g, otst);
     dibujarGrupo(caja, select, area, cli, g, otst);
+  }
+
+  // ─────────────────────────────────────────────
+  // Cierre automático del grupo: al registrar la OTST donde queda el seguimiento (la
+  // mayor), las demás OTST del encabezado se cierran solas con «contacto efectivo», el
+  // mismo texto y el mismo contacto: se envía por detrás el mismo formulario de la
+  // intranet que llenarías a mano. Después se revisa que cada una salió del estado; si
+  // alguna falla, esta no se envía y se avisa cuál hacer a mano.
+  // ─────────────────────────────────────────────
+  const ESTADO_LLAMADA = /llamada seguimiento diagn/i;
+  let grupoListo = false;
+
+  // OTST del encabezado que faltan por cerrar (solo si esta es la del seguimiento)
+  function pendientesDelGrupo(area) {
+    const otst = otstActual();
+    const enc = area ? leerEncabezado(area.value) : null;
+    if (!enc || enc.seguimiento !== otst || !enc.otsts.includes(otst)) return null;
+    const hoyK = clave(new Date());
+    const hechas = new Set(leerJSON(CLAVE_LOG, []).filter((e) => e && e.ts && clave(new Date(e.ts)) === hoyK).map((e) => String(e.otst)));
+    const otras = enc.otsts.filter((o) => o !== otst && !hechas.has(o));
+    return otras.length ? { enc, otras } : null;
+  }
+
+  async function estadoOtst(o) {
+    const h = await (await fetch(`/stecnico/item/${o}`, { credentials: 'same-origin' })).text();
+    const d = new DOMParser().parseFromString(h, 'text/html');
+    const p = [...d.querySelectorAll('p')].find((x) => /^\s*Estado:/.test(x.textContent));
+    return p ? p.textContent.replace(/\s+/g, ' ').replace(/^\s*Estado:\s*/, '').replace(/\s*Tiempo Restante.*$/i, '').trim() : '';
+  }
+
+  // Envía el formulario de llamada de otra OTST con «contacto efectivo». Devuelve su nuevo estado.
+  async function cerrarOtst(o, texto, contacto) {
+    const url = `/stecnico/item/${o}/diagnosiscall`;
+    const doc = new DOMParser().parseFromString(await (await fetch(url, { credentials: 'same-origin' })).text(), 'text/html');
+    const ta = doc.querySelector('textarea');
+    const form = ta && ta.form;
+    const sel = form && [...form.querySelectorAll('select')].find((s) => [...s.options].some((x) => /contacto con el cliente fue efectivo/i.test(x.text)));
+    if (!form || !sel) {
+      // Sin formulario: otra persona ya la registró (o cambió de estado)
+      const ya = await estadoOtst(o);
+      if (ya && !ESTADO_LLAMADA.test(ya)) return { est: ya, ya: true };
+      throw new Error('no se encontró el formulario de llamada');
+    }
+    const datos = new URLSearchParams();
+    for (const el of form.elements) {
+      if (!el.name || el.disabled || el.type === 'submit' || el.type === 'button') continue;
+      if ((el.type === 'checkbox' || el.type === 'radio') && !el.checked) continue;
+      datos.append(el.name, el.value);
+    }
+    datos.set(sel.name, [...sel.options].find((x) => /contacto con el cliente fue efectivo/i.test(x.text)).value);
+    datos.set(ta.name, texto);
+    const textos = [...form.elements].filter((el) => el.type === 'text' && el.name);
+    const inContacto = textos.find((el) => /contacto/i.test(el.name) && !/fecha/i.test(el.name));
+    if (inContacto) datos.set(inContacto.name, contacto);
+    textos.filter((el) => /fecha/i.test(el.name)).forEach((el) => datos.set(el.name, ''));
+    const btn = [...form.elements].find((el) => el.type === 'submit' && /continuar/i.test(el.value || ''));
+    if (btn && btn.name) datos.set(btn.name, btn.value);
+    const destino = new URL(form.getAttribute('action') || url, location.origin + url).href;
+    const resp = await fetch(destino, { method: 'POST', credentials: 'same-origin', body: datos });
+    const rd = new DOMParser().parseFromString(await resp.text(), 'text/html');
+    const err = rd.querySelector('.messages.error, .messages--error, .alert-danger');
+    if (err && err.textContent.trim()) throw new Error(err.textContent.replace(/\s+/g, ' ').trim().slice(0, 160));
+    const est = await estadoOtst(o);
+    if (!est || ESTADO_LLAMADA.test(est)) throw new Error('la intranet no la cambió de estado');
+    return { est, ya: false };
+  }
+
+  function anotarCierre(o, enc, texto, contacto) {
+    const log = leerJSON(CLAVE_LOG, []);
+    log.push({ otst: o, ts: new Date().toISOString(), accion: 'efectiva', fecha: null, grupo: enc.seguimiento, otsts: enc.otsts, auto: true });
+    guardarJSON(CLAVE_LOG, log.slice(-3000));
+    const prev = grupoGuardado();
+    const mismo = prev && prev.seguimiento === enc.seguimiento;
+    guardarJSON(CLAVE_GRUPO, {
+      dia: clave(new Date()), seguimiento: enc.seguimiento, otsts: enc.otsts, texto, contacto: contacto || (mismo ? prev.contacto || '' : ''),
+      fecha: mismo ? prev.fecha || null : null, hechas: [...new Set([...(mismo ? prev.hechas || [] : []), o])],
+    });
+  }
+
+  function modalGrupo({ otst, otras, enc, efectivo, fechaTxt, contacto, texto }, alTerminar) {
+    const ov = document.createElement('div'); ov.id = 'ot-ls-overlay';
+    const m = document.createElement('div'); m.id = 'ot-ls-modal'; m.className = 'ancho';
+    const h = document.createElement('h3'); h.textContent = 'Llamada agrupada: cerrar las demás OTST';
+    const p = document.createElement('p');
+    p.textContent = `Se cerrarán con «contacto efectivo», el mismo texto${contacto ? ` y el contacto ${contacto}` : ''}. Después se registra esta.`;
+    const ul = document.createElement('ul'); ul.className = 'ls-lista';
+    const estados = {};
+    const item = (o, txt) => {
+      const li = document.createElement('li');
+      const b = document.createElement('b'); b.textContent = o;
+      const s = document.createElement('span'); s.className = 'ls-est';
+      li.append(b, ` — ${txt}`, s);
+      ul.appendChild(li);
+      estados[o] = s;
+    };
+    otras.forEach((o) => item(o, 'se cierra (contacto efectivo)'));
+    item(otst, efectivo ? `esta: se cierra (contacto efectivo)` : `esta: Contactar nuevamente → ${fechaTxt}`);
+    const btns = document.createElement('div'); btns.className = 'ls-btns';
+    const no = document.createElement('button'); no.type = 'button'; no.className = 'ls-no'; no.textContent = 'Cancelar';
+    const ok = document.createElement('button'); ok.type = 'button'; ok.className = 'ls-ok'; ok.textContent = `Sí, cerrar ${otras.length} y continuar`;
+    btns.append(no, ok);
+    m.append(h, p, ul, btns);
+    ov.appendChild(m); document.body.appendChild(ov);
+    let trabajando = false;
+    const cerrar = () => { if (trabajando) return; document.removeEventListener('keydown', tecla, true); ov.remove(); };
+    const tecla = (e) => { if (e.key === 'Escape') { e.preventDefault(); cerrar(); } };
+    document.addEventListener('keydown', tecla, true);
+    no.addEventListener('click', cerrar);
+    ov.addEventListener('click', (e) => { if (e.target === ov) cerrar(); });
+    ok.focus();
+    ok.addEventListener('click', async () => {
+      trabajando = true;
+      ok.disabled = no.disabled = true;
+      const fallas = [];
+      for (const o of otras) {
+        estados[o].className = 'ls-est'; estados[o].textContent = '⏳ cerrando…';
+        try {
+          const r = await cerrarOtst(o, texto, contacto);
+          if (!r.ya) anotarCierre(o, enc, texto, contacto);
+          estados[o].className = 'ls-est ok'; estados[o].textContent = r.ya ? `✔ ya estaba: ${r.est}` : `✅ ${r.est}`;
+        } catch (err) {
+          fallas.push(o);
+          estados[o].className = 'ls-est mal';
+          estados[o].textContent = `❌ ${err.message.replace(/\.+$/, '')}. `;
+          const a = document.createElement('a'); a.href = `/stecnico/item/${o}/diagnosiscall`; a.target = '_blank'; a.textContent = 'Hacerla a mano';
+          estados[o].appendChild(a);
+        }
+      }
+      trabajando = false;
+      if (!fallas.length) {
+        estados[otst].className = 'ls-est ok'; estados[otst].textContent = '⏳ registrando…';
+        setTimeout(() => { document.removeEventListener('keydown', tecla, true); ov.remove(); alTerminar(); }, 700);
+        return;
+      }
+      // Alguna falló: esta no se envía sola; se puede seguir solo con esta
+      p.textContent = `No se pudo${fallas.length > 1 ? 'n' : ''} cerrar ${fallas.join(', ')}. Esta OTST aún no se ha registrado.`;
+      no.disabled = false; no.textContent = 'Revisar';
+      ok.disabled = false; ok.textContent = 'Registrar solo esta';
+      const ok2 = ok.cloneNode(true); ok.replaceWith(ok2);
+      ok2.addEventListener('click', () => { document.removeEventListener('keydown', tecla, true); ov.remove(); alTerminar(); });
+    });
+  }
+
+  function avisoModal(texto) {
+    const ov = document.createElement('div'); ov.id = 'ot-ls-overlay';
+    const m = document.createElement('div'); m.id = 'ot-ls-modal';
+    const p = document.createElement('p'); p.textContent = texto;
+    const btns = document.createElement('div'); btns.className = 'ls-btns';
+    const ok = document.createElement('button'); ok.type = 'button'; ok.className = 'ls-ok'; ok.textContent = 'Entendido';
+    btns.append(ok); m.append(p, btns); ov.appendChild(m); document.body.appendChild(ov);
+    ok.addEventListener('click', () => ov.remove());
+    ok.focus();
+  }
+
+  // Se ejecuta antes del envío (y antes de la confirmación de «contacto efectivo»)
+  function autoGrupo(e, select) {
+    if (grupoListo) return;
+    const area = (select.form || document).querySelector('textarea');
+    const pend = pendientesDelGrupo(area);
+    if (!pend) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (document.getElementById('ot-ls-overlay')) return;
+    const efectivo = esEfectivo(select);
+    const inFecha = inputTrasEtiqueta('Fecha para Próximo Contacto');
+    const fechaTxt = !efectivo && inFecha ? inFecha.value.trim() : '';
+    if (!efectivo && !fechaTxt) { avisoModal('Elige primero la fecha de próximo contacto de esta OTST (donde queda el seguimiento). Las demás se cierran al dar Continuar.'); return; }
+    if (area.value.replace(RE_ENCABEZADO, '').trim().length < 3) { avisoModal('Escribe debajo del encabezado lo que se habló: ese texto queda en todas las OTST del grupo.'); return; }
+    const inContacto = inputTrasEtiqueta('Nombre Contacto');
+    const contacto = inContacto ? inContacto.value.trim() : '';
+    modalGrupo({ otst: otstActual(), otras: pend.otras, enc: pend.enc, efectivo, fechaTxt, contacto, texto: area.value }, () => {
+      grupoListo = true;
+      confirmado = true; // ya se confirmó en este modal
+      const btn = botonContinuar();
+      if (btn) btn.click(); else if (select.form) select.form.requestSubmit();
+      setTimeout(() => { grupoListo = false; confirmado = false; }, 1500);
+    });
   }
 
   // ─────────────────────────────────────────────
@@ -687,8 +885,11 @@
       select.addEventListener('change', () => setTimeout(() => asegurarCalendario(select), 60));
 
       const btn = botonContinuar();
+      // Primero el cierre automático del grupo (si aplica), luego la confirmación de «contacto efectivo»
+      if (btn) btn.addEventListener('click', (e) => autoGrupo(e, select), true);
       if (btn) btn.addEventListener('click', (e) => proteger(e, select), true);
       if (select.form) {
+        select.form.addEventListener('submit', (e) => autoGrupo(e, select), true);
         select.form.addEventListener('submit', (e) => proteger(e, select), true);
         // Fase de burbuja: solo registra si nadie canceló el envío
         select.form.addEventListener('submit', (e) => registrarLlamada(e, select));

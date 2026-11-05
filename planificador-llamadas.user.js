@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Planificador de Llamadas de Seguimiento - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.6.0
+// @version      1.7.0
 // @description  En el Libro de Trabajo y en la Agenda rápida (/stecnico/agenda-llamadas): arma tu lista de llamadas del día con tu cupo (p. ej. 40 = máx. 10 de seguimiento [vencidas/reprogramadas] + el resto nuevas sin contacto) y filtro "Mis técnicos", muestra la carga de los próximos días hábiles (con festivos de Colombia), alertas, envejecimiento y avance. La Agenda abre al instante con la última lista guardada y actualiza el Libro de Trabajo en segundo plano. Opcional: se sincroniza con un Google Sheet (Apps Script) para guardar la bitácora y los indicadores, y para que varias personas llamen desde la misma cola sin repetir OTST. Solo lee la intranet: nunca cambia fechas ni envía formularios.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/libro_trabajo*
@@ -20,7 +20,7 @@
   'use strict';
 
   // Debe coincidir siempre con @version del header de arriba.
-  const VERSION = '1.6.0';
+  const VERSION = '1.7.0';
   const SYNC_CADA_MS = 20 * 1000;    // Sheet: cada cuánto se consulta la cola compartida (pestaña visible)
   const TOMADA_MIN = 20;             // una OTST "tomada" se libera sola a los 20 min si no se registra la llamada
   const URL_AGENDA = '/stecnico/agenda-llamadas';
@@ -645,6 +645,11 @@
       #hpl .hpl-prio h4 { color: #a52a1a; margin: 0 0 6px; font-size: 13px; }
       #hpl .hpl-prio table.hpl-lista td { border-bottom-color: #f6dcd7; }
       #hpl .tag.prio { background: #fdecea; color: #c0392b; }
+      #hpl .hpl-gar { border: 1px solid #f0d58a; border-left: 4px solid #d69e00; background: #fffbea; border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
+      #hpl .hpl-gar h4 { color: #8a6100; margin: 0 0 6px; font-size: 13px; }
+      #hpl .hpl-gar table.hpl-lista td { border-bottom-color: #f5e9bf; }
+      #hpl .hpl-gar .hpl-nota { font-size: 11px; color: #8a7a4a; margin-top: 4px; }
+      #hpl a.llamar small { font-weight: 400; color: #6b7a8c; }
       #hpl .tag.externa { background: #eef2f7; color: #4a5568; font-weight: 400; }
       #hpl .prio-nota { color: #a52a1a; font-size: 11.5px; margin-top: 2px; font-weight: 700; }
       #hpl .prio-nota span { color: #8a97a8; font-weight: 400; }
@@ -769,11 +774,24 @@
     const prioPend = Object.values(prios).filter((p) => p.estado === 'activa' && !atendidaHoy(p)).sort((a, b) => a.ts - b.ts);
     const prioClientes = new Set();
     prioPend.forEach((p) => { const f = porOtst[p.otst]; if (f) { usados.add(f.cliente); prioClientes.add(f.cliente); } });
+
+    // Garantía: se llaman lo antes posible. Bloque propio arriba (vencidas/hoy y sin contacto),
+    // sin cupo ni filtro de técnicos; las agendadas a futuro esperan su fecha. Un cliente = una
+    // llamada (solo con sus otras OTST en garantía). Sus clientes no se repiten en la lista normal.
+    const prioOtst = new Set(prioPend.map((p) => p.otst));
+    const garUrgente = (f) => f.garantia && f.tipo !== 'agendada';
+    const garClientes = new Set();
+    const garPend = [...plan.seg.filter((f) => f.tipo !== 'agendada'), ...plan.nuevas].filter((f) => {
+      if (!f.garantia || ultimaDe[f.otst] || grupoDe[f.otst] || prioOtst.has(f.otst) || prioClientes.has(f.cliente) || garClientes.has(f.cliente)) return false;
+      garClientes.add(f.cliente);
+      return true;
+    });
+    garClientes.forEach((c) => usados.add(c));
     const elegir = (cands, n) => {
       const r = [];
       for (const f of cands) {
         if (r.length >= n) break;
-        if (!libre(f) || usados.has(f.cliente)) continue;
+        if (!libre(f) || usados.has(f.cliente) || garUrgente(f)) continue;
         usados.add(f.cliente);
         r.push(f);
       }
@@ -785,7 +803,7 @@
     const pendNue = elegir(plan.nuevas, Math.max(0, cupoNuevasMias - llamadasNue.length));
     const vistosOtros = new Set();
     const enLlamadaOtros = [...pendientesSeg, ...plan.nuevas].filter((f) => {
-      if (ultimaDe[f.otst] || !deMisTec(f) || !clienteTomado[f.cliente] || vistosOtros.has(f.cliente) || prioClientes.has(f.cliente)) return false;
+      if (ultimaDe[f.otst] || !deMisTec(f) || !clienteTomado[f.cliente] || vistosOtros.has(f.cliente) || prioClientes.has(f.cliente) || garClientes.has(f.cliente)) return false;
       vistosOtros.add(f.cliente);
       return true;
     });
@@ -802,8 +820,10 @@
       const faltan = g ? g.otsts.map(String).filter((o) => !ultimaDe[o] && o in reg.actual).map((o) => itemSub(o, seg, true)) : [];
       return [...hechos, ...faltan];
     };
+    // Las OTST en garantía y las que no, se agrupan aparte
+    const mismoTipoGar = (o, f) => !!(porOtst[o] || {}).garantia === !!f.garantia;
     const itemsPend = (f) => {
-      const otras = (porCliente[f.cliente] || []).filter((o) => o !== f.otst && !ultimaDe[o] && !grupoDe[o]);
+      const otras = (porCliente[f.cliente] || []).filter((o) => o !== f.otst && !ultimaDe[o] && !grupoDe[o] && mismoTipoGar(o, f));
       const seg = otras.length ? mayor([f.otst, ...otras]) : null;
       const todas = otras.length ? [f.otst, ...otras] : null;
       return [{ otst: f.otst, tipo: f.tipo, fechaIni: f.fecha, seg: f.otst === seg, todas }, ...otras.map((o) => ({ ...itemSub(o, seg, false), todas }))];
@@ -817,7 +837,12 @@
       items[0] = { ...items[0], prio: p };
       return items;
     });
-    ultimaLista = [...listaPrio, ...listaSeg, ...listaNue];
+    const listaGar = garPend.flatMap((f) => {
+      const items = itemsPend(f);
+      items[0] = { ...items[0], gar: true };
+      return items;
+    });
+    ultimaLista = [...listaPrio, ...listaGar, ...listaSeg, ...listaNue];
     const cupoNuevasTxt = Math.max(0, cupoNuevasMias);
 
     const nVenc = plan.seg.filter((f) => f.tipo === 'vencida').length;
@@ -909,7 +934,7 @@
       const tec = f ? f.tecnico : (it.hecha && it.hecha.tecnico) || (pr && pr.tecnico) || '';
       const gar = f ? f.garantia : !!(pr && pr.garantia);
       const c = contactos[it.otst];
-      const marca = it.hecha ? '✅' : it.sub ? '↳' : extraClase === 'tomada' ? '🔒' : it.prio ? '🚩' : ++n;
+      const marca = it.hecha ? '✅' : it.sub ? '↳' : extraClase === 'tomada' ? '🔒' : it.prio ? '🚩' : it.gar ? '🛡' : ++n;
       const tipoHtml = it.tipo === 'externa'
         ? `<span class="tag externa" title="No está en Llamada Seguimiento Diagnóstico">${esc((pr && pr.estadoOT) || 'Otro estado')}</span>`
         : `<span class="tag ${it.tipo}">${esc(etiquetaTipo(it.tipo, it.fechaIni))}</span>`;
@@ -928,10 +953,13 @@
     };
     // data-otsts: todas las OTST del cliente quedan "en llamada" para las demás personas
     const llamarHtml = (otst, texto, todas) => `<a class="llamar" data-otst="${otst}" data-otsts="${(todas || [otst]).join(',')}" href="/stecnico/item/${otst}/diagnosiscall" target="hpl_otst">${texto}</a>`;
+    // Cliente con varias OTST: 📞 Llamar abre la mayor (⭐); al registrarla, la Llamada de
+    // Seguimiento cierra solas las demás. 📝 queda para hacerlo a mano si hace falta.
+    const abrir = (it) => (it.todas ? mayor(it.todas) : it.otst);
     const accionDe = (it) => (it.hecha ? esc(resultado(it.hecha))
       : it.falta ? llamarHtml(it.otst, '📝 Falta registrar')
-      : it.sub ? llamarHtml(it.otst, '📝 Registrar', it.todas)
-      : llamarHtml(it.otst, '📞 Llamar', it.todas));
+      : it.sub ? (it.seg ? '<span class="mismo">⭐ se abre con 📞 Llamar</span>' : `<span class="mismo">se cierra sola</span> ${llamarHtml(it.otst, '📝', it.todas).replace('<a ', '<a title="Registrarla a mano" ')}`)
+      : llamarHtml(abrir(it), it.todas ? `📞 Llamar <small>(${abrir(it)})</small>` : '📞 Llamar', it.todas));
     let filasLista = orden.map((it) => filaHtml(it, it.hecha ? 'hecha' : '', accionDe(it))).join('');
 
     // Prioritarias (arriba de las pestañas)
@@ -947,9 +975,23 @@
       }
       const t = clienteTomado[porOtst[it.otst].cliente];
       return t
-        ? filaHtml(it, 'tomada', `<span class="quien">${esc(t.usuario)} · ${haceTexto(t.ts)}</span> ${llamarHtml(it.otst, 'Llamar igual', it.todas)} ${quitarHtml(it.otst)}`)
+        ? filaHtml(it, 'tomada', `<span class="quien">${esc(t.usuario)} · ${haceTexto(t.ts)}</span> ${llamarHtml(abrir(it), 'Llamar igual', it.todas)} ${quitarHtml(it.otst)}`)
         : filaHtml(it, '', `${accionDe(it)} ${quitarHtml(it.otst)}`);
     }).join('');
+
+    // Garantía (debajo de las prioritarias)
+    const filasGar = listaGar.map((it) => {
+      if (it.sub) return filaHtml(it, '', accionDe(it));
+      const t = clienteTomado[porOtst[it.otst].cliente];
+      return t
+        ? filaHtml(it, 'tomada', `<span class="quien">${esc(t.usuario)} · ${haceTexto(t.ts)}</span> ${llamarHtml(abrir(it), 'Llamar igual', it.todas)}`)
+        : filaHtml(it, '', accionDe(it));
+    }).join('');
+    const bloqueGar = filasGar
+      ? `<div class="hpl-gar"><h4>🛡 Garantía — llamar lo antes posible (${garPend.length} ${garPend.length === 1 ? 'cliente' : 'clientes'})</h4><table class="hpl-lista">
+          <tr><th>#</th><th>OTST</th><th>Tipo</th><th>Cliente</th><th>Tiempo</th><th>Técnico</th><th></th></tr>${filasGar}</table>
+          <div class="hpl-nota">Vencidas, de hoy y sin contacto en garantía, de todos los técnicos y sin gastar el cupo de la lista. Las agendadas a futuro aparecen aquí el día de su fecha.</div></div>`
+      : '';
     const bloquePrio = filasPrio
       ? `<div class="hpl-prio"><h4>🚩 Prioritarias (${prioPend.length})</h4><table class="hpl-lista">
           <tr><th>#</th><th>OTST</th><th>Tipo</th><th>Cliente</th><th>Tiempo</th><th>Técnico</th><th></th></tr>${filasPrio}</table></div>`
@@ -1035,6 +1077,7 @@
         <div class="hpl-card" style="margin-bottom:12px"><h4>Tendencia</h4>${tendencia}</div>
         <div class="hpl-card hpl-lista-card">
           ${bloquePrio}
+          ${bloqueGar}
           <div class="hpl-tabs">
             <button type="button" data-tab="seg" class="${pestana === 'seg' ? 'act' : ''}">Seguimiento de hoy (${llamadasSeg.length} hechas · cupo ${cfg.cupoSeg})</button>
             <button type="button" data-tab="nue" class="${pestana === 'nue' ? 'act' : ''}">Nuevas de hoy (${llamadasNue.length} hechas · cupo ${cupoNuevasTxt})</button>
@@ -1046,7 +1089,7 @@
             <tr><th>#</th><th>OTST</th><th>Tipo</th><th>Cliente</th><th>Tiempo</th><th>Técnico</th><th></th></tr>
             ${filasLista || `<tr><td colspan="7">${filtroTec.length ? 'No quedan OTST pendientes de tus técnicos en esta lista.' : 'No hay llamadas pendientes en esta lista.'}</td></tr>`}
           </table>
-          <div class="hpl-nota">Tu lista toma los siguientes clientes libres de la cola hasta completar tu cupo: seguimiento, lo más atrasado primero; nuevas, la de mayor antigüedad primero. Un cliente con varias OTST es <b>una sola llamada</b>: sus demás OTST van debajo (↳) y ⭐ marca la mayor, donde se deja el seguimiento; las demás se cierran con el mismo texto (la Llamada de Seguimiento lo rellena). ✅ = registrada hoy${sync ? '; 🔒 = otra persona está llamando a ese cliente' : ''}.</div>
+          <div class="hpl-nota">Tu lista toma los siguientes clientes libres de la cola hasta completar tu cupo: seguimiento, lo más atrasado primero; nuevas, la de mayor antigüedad primero. Un cliente con varias OTST es <b>una sola llamada</b>: sus demás OTST van debajo (↳) y ⭐ marca la mayor, donde se deja el seguimiento; 📞 Llamar abre la ⭐ y, al registrarla, las demás se cierran solas con el mismo texto. Las OTST en garantía van en su propio bloque y no se agrupan con las demás. ✅ = registrada hoy${sync ? '; 🔒 = otra persona está llamando a ese cliente' : ''}.</div>
         </div>
       </div>`;
 
@@ -1172,7 +1215,7 @@
       const tipoTxt = it.tipo === 'externa' ? (f.estadoOT || 'Otro estado') : tipo[it.tipo] || it.tipo;
       const estadoTxt = it.falta ? 'Falta registrar (grupo)'
         : it.hecha ? (it.hecha.accion === 'efectiva' ? 'Efectiva' : it.hecha.accion === 'reprogramada' ? `Reprogramada ${fecha(it.hecha.fecha)}`.trim() : it.hecha.accion === 'atendida' ? 'Llamada hecha' : 'Salió del estado')
-        : it.prio ? `Prioritaria pendiente${it.prio.nota ? ': ' + it.prio.nota : ''}` : 'Pendiente';
+        : it.prio ? `Prioritaria pendiente${it.prio.nota ? ': ' + it.prio.nota : ''}` : it.gar ? 'Garantía pendiente' : 'Pendiente';
       filas.push([it.otst, f.cliente || '', f.tecnico || '', f.garantia ? 'SI' : 'NO', tipoTxt, fecha(it.fechaIni), estadoTxt]);
     });
     descargarCSV(filas, `llamadas_${lista.fecha}.csv`);

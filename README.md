@@ -457,14 +457,24 @@ Los dos scripts trabajan juntos (comparten el almacenamiento del navegador en la
 
 Cuando un cliente tiene varias OTST se hace **una sola llamada**: todas llevan el mismo texto, se cierran con *contacto efectivo* y solo la mayor queda abierta (reprogramada). Así, la próxima vez sale una sola llamada.
 
-1. En la agenda, **📞 Llamar** en el cliente (todas sus OTST quedan 🔒 para los demás).
+1. En la agenda, **📞 Llamar** en el cliente: abre directamente la **mayor** (⭐, xn) y todas sus OTST quedan 🔒 para los demás.
 2. En la llamada aparece el recuadro **🔗 Llamada agrupada** con las OTST del cliente: desmarca las que no correspondan (p. ej. otro contacto) y dale **Insertar encabezado**. Pone como primera línea de la Observación:
    `Orden relacionada con la OTST x1, x2, …, xn. Se deja seguimiento en xn` (xn = la mayor)
-   y elige la acción: *contacto efectivo* si la OTST se cierra, *Contactar nuevamente* si es xn.
-3. Escribe debajo lo que se habló y dale **Continuar**.
-4. Vuelve a la agenda y abre las demás con **📝 Registrar** (o **📝 Falta registrar**): el texto, el nombre del contacto, la acción y (en xn) la fecha **se rellenan solos**. Solo revisas y das Continuar.
+3. Escribe debajo lo que se habló, el nombre del contacto, *Contactar nuevamente* y la fecha, y dale **Continuar**.
+4. Sale un recuadro con lo que va a pasar ("42762 se cierra (contacto efectivo) · 42802 Contactar nuevamente → 19/11"). Al aceptar, **las demás OTST se cierran solas**: el script envía por detrás el mismo formulario de la intranet (contacto efectivo, el mismo texto y el mismo contacto) y revisa en la página de cada una que salió del estado. Luego se registra la mayor con tu fecha.
+   - Si alguna no se pudo cerrar, **la mayor no se envía** y te dice cuál falló, con **Hacerla a mano** (o **Registrar solo esta**).
+   - Si otra persona ya la había registrado, se marca "ya estaba" y sigue.
+5. En la agenda todas quedan ✅ y cuentan como **1 llamada**.
+
+Si abres una OTST que no es la mayor, el recuadro te ofrece **abrir la ⭐** (desde ahí se cierran solas). También puedes seguir haciéndolo a mano como antes: cada OTST con 📝, el texto se rellena solo.
+
+**Garantía:** las OTST en garantía no se agrupan con las que no lo son. En el recuadro de la llamada solo vienen marcadas las del mismo tipo que la que abriste (las otras se muestran con 🛡 garantía, sin marcar).
 
 Si escribes el encabezado a mano con ese formato también se reconoce. El grupo se recuerda solo durante el día. En la agenda y en el Sheet el grupo cuenta como **1 llamada**; la Bitácora conserva una fila por OTST.
+
+### Garantía 🛡: llamar lo antes posible
+
+Las OTST en garantía van en su propio bloque amarillo **🛡 Garantía — llamar lo antes posible**, arriba de tus pestañas (debajo de las prioritarias): las vencidas, las de hoy y las sin contacto, de **todos los técnicos** (sin el filtro de *Mis técnicos*) y **sin gastar el cupo** de la lista normal. Las que ya tienen fecha a futuro esperan ese día y aparecen ahí cuando llegue. Un cliente con varias OTST en garantía es una llamada; sus OTST que no son de garantía no salen en tu lista normal ese día (para no llamarlo dos veces). Con ☁ Sheets, lo que otra persona está llamando sale con 🔒.
 
 ### OTST prioritarias 🚩
 
