@@ -447,6 +447,7 @@ Los dos scripts trabajan juntos (comparten el almacenamiento del navegador en la
    - **Seguimiento** (vencidas + agendadas): máx. **10 por día hábil**, lo más atrasado primero. Si un día ya tiene 10, el excedente se corre al siguiente día con cupo.
    - **Nuevas** (sin fecha de próximo contacto): el resto del cupo diario (40 − seguimientos), de la más antigua a la más reciente.
    - **Tu lista de hoy** toma los siguientes clientes libres de la cola hasta completar tu cupo (lo que ya llamaste queda con ✅ arriba). Cada OTST que cambia de fecha o sale del estado suma al avance.
+   - La lista **no es una foto fija del día**: se rearma con cada lectura del Libro de Trabajo, así que las OTST que los ingenieros pasan a este estado durante el día entran a la cola (en *Nuevas*, detrás de las más antiguas). La primera foto del día solo sirve para contar el avance (qué se llamó hoy y si era seguimiento o nueva).
    - **Un cliente con varias OTST = una llamada**: sus demás OTST van debajo (↳) sin gastar cupo, con el nombre del contacto de cada una (para ver si es la misma persona). ⭐ marca la mayor, donde se deja el seguimiento.
    - ⚙️ **Cupos**: tus llamadas por día, cuántas de ellas son de seguimiento, y el máximo de reprogramaciones por día de todo el equipo (lo que se agenda en la intranet, por defecto 10).
    - **Mis técnicos**: chips con los técnicos de la columna *Técnico*. Marca los tuyos y tu lista solo toma sus OTST ("yo llamo los de Germán, tú los de Wilfor"). *Todos* quita el filtro.
@@ -464,6 +465,17 @@ Cuando un cliente tiene varias OTST se hace **una sola llamada**: todas llevan e
 4. Vuelve a la agenda y abre las demás con **📝 Registrar** (o **📝 Falta registrar**): el texto, el nombre del contacto, la acción y (en xn) la fecha **se rellenan solos**. Solo revisas y das Continuar.
 
 Si escribes el encabezado a mano con ese formato también se reconoce. El grupo se recuerda solo durante el día. En la agenda y en el Sheet el grupo cuenta como **1 llamada**; la Bitácora conserva una fila por OTST.
+
+### OTST prioritarias 🚩
+
+Para cuando un asesor pide llamar a un cliente con atención especial:
+
+- **Clic derecho** sobre una fila de la agenda (o de la tabla del Libro de Trabajo) → escribe el motivo o quién lo pidió. Clic derecho otra vez sobre una prioritaria = quitarle la prioridad.
+- **🚩 Agregar prioritaria** (junto a las pestañas): escribe el número de cualquier OTST. Si no está en *Llamada Seguimiento Diagnóstico*, el script abre su página de detalle y trae el cliente, el técnico responsable, si algún equipo está en garantía y el estado actual.
+- Salen en el recuadro rojo **🚩 Prioritarias**, arriba de tus pestañas, sin importar el filtro de *Mis técnicos*, con el motivo y quién la marcó. Su cliente no se repite en la lista normal.
+- Se dan por atendidas solas al registrar la llamada (Continuar en la Llamada de Seguimiento). Si la OTST está en otro estado (sin formulario de llamada en la intranet): **📞 Ver OTST** y, después de llamar, **✔ Llamada hecha** (cuenta como llamada del día). **✕** quita la prioridad.
+- En la Llamada de Seguimiento de esa OTST aparece el aviso **🚩 OTST prioritaria** con el motivo.
+- Con ☁ Sheets las prioritarias se comparten con todo el equipo (hoja **Prioritarias**: quién la marcó, cuándo y quién la atendió).
 
 La tendencia y el promedio de OTST que entran por día se vuelven exactos con unos días de uso (antes se estiman con la columna *Tiempo*).
 
@@ -489,6 +501,7 @@ Con el Apps Script `agenda-llamadas.gs` la agenda guarda cada llamada en un Goog
 - En el Sheet:
   - **Bitácora**: una fila por OTST registrada (fecha y hora, persona, OTST, Efectiva/Reprogramada, próximo contacto, tipo, cliente, técnico, grupo, *Cuenta como llamada* 1/0, OTST del grupo).
   - **Resumen diario**: el estado de la cola cada día (pendientes, vencidas, sin contacto, entraron, llamadas, días de cola) + gráfico.
+  - **Prioritarias**: OTST marcadas con 🚩 (motivo, quién y cuándo la marcó, activa/atendida/quitada y quién la terminó).
   - **Indicadores**: llamadas por día y persona (un grupo = 1), OTST registradas por día y persona, resultado por persona y por técnico, OTST por tipo, OTST con más intentos.
 
 **Preparación (una sola vez, la hace una persona):**
@@ -497,11 +510,38 @@ Con el Apps Script `agenda-llamadas.gs` la agenda guarda cada llamada en un Goog
 2. En el Sheet: **Extensiones → Apps Script**. Borra lo que haya y pega el contenido de `agenda-llamadas.gs`.
 3. **Configuración del proyecto (⚙) → Propiedades del script → Agregar**: `CLAVE` = una clave secreta larga que te inventes.
 4. Arriba elige la función **configurar** y dale **▶ Ejecutar** (acepta los permisos). Crea las hojas Bitácora, Resumen diario e Indicadores.
-5. **Implementar → Nueva implementación → Aplicación web**: *Ejecutar como*: Yo · *Quién tiene acceso*: Cualquier usuario. Copia la URL que termina en `/exec` (abierta en el navegador debe mostrar `"version":"1.1"`).
+5. **Implementar → Nueva implementación → Aplicación web**: *Ejecutar como*: Yo · *Quién tiene acceso*: Cualquier usuario. Copia la URL que termina en `/exec` (abierta en el navegador debe mostrar `"version":"1.3"`).
 
 **Cada persona:** en la Agenda de llamadas → **☁ Sheets** → pega la URL, la CLAVE y escribe su nombre (así la ven los demás). Para desconectarte deja la URL vacía. Tampermonkey pedirá permiso para conectarse a `script.google.com` la primera vez: elige *Permitir siempre*.
 
 Si cambias el Apps Script: pega el código nuevo, vuelve a ejecutar **configurar** (rehace la hoja Indicadores; no borra la Bitácora) y luego **Implementar → Administrar implementaciones → editar (lápiz) → Versión: Nueva versión → Implementar** (la URL no cambia).
+
+### Datos en JSON para otro sistema (desde la versión 1.2 del Apps Script)
+
+La misma URL `/exec` entrega los datos en JSON, solo lectura, para cargarlos en otro sistema de indicadores.
+
+1. En el Apps Script: **Configuración del proyecto (⚙) → Propiedades del script → Agregar** `CLAVE_LECTURA` = otra clave larga, **distinta** de `CLAVE` (esta solo permite leer; la de escritura no funciona aquí).
+2. URL: `https://script.google.com/macros/s/…/exec?clave=CLAVE_LECTURA&desde=2026-11-01&hasta=2026-11-30`
+   - Sin `desde`/`hasta`: últimos 30 días (máximo 370).
+   - `&secciones=indicadores` para traer solo una parte (`llamadas`, `resumen`, `indicadores`, `prioritarias`, separadas por coma).
+3. Google responde con una redirección: el otro sistema debe seguirla (`curl -L`, o `fetch` en el navegador).
+
+Respuesta:
+
+| Sección | Contenido |
+|---|---|
+| `llamadas` | Cada OTST registrada: fecha, hora, usuario, OTST, acción (`efectiva` = se cerró, `reprogramada` = quedó agendada), próximo contacto, tipo, cliente, técnico, grupo, `cuenta` (1 = cuenta como llamada) |
+| `prioritarias` | OTST marcadas 🚩 en el rango: motivo, quién la marcó, estado (activa/atendida/quitada) y `horasHastaAtender` |
+| `resumen` | Estado de la cola por día: pendientes, vencidas, para hoy, agendadas, sin contacto, entraron, salieron, `flujoNeto` (entraron − salieron), días de cola |
+| `indicadores.totales` | Llamadas, OTST registradas, seguimiento vs nuevas, % efectivas, `otstPorLlamada` y `llamadasAhorradasPorAgrupacion` |
+| `indicadores.porDiaPersona` / `porPersona` | Llamadas vs meta de 40 (`cumplimientoMeta` en %), `superaTopeSeguimiento` (más de 10 reprogramadas), días en meta |
+| `indicadores.intentosHastaCierre` | Promedio y distribución (1, 2, 3, 4+) de llamadas hasta el contacto efectivo; cierres difíciles y OTST abiertas con 3+ intentos |
+| `indicadores.cumplimientoFecha` | Si la llamada siguiente se hizo en la fecha agendada, antes o tarde; % a tiempo y días de atraso |
+| `indicadores.cola` | Pendientes al inicio y al final, vencidas, entraron/salieron y días de cola del periodo |
+| `indicadores.porTecnico` / `porCliente` | OTST distintas, intentos por OTST, % efectivas, grupos (clientes: los 50 con más OTST) |
+| `indicadores.porHora` | Registros y % efectivas por hora del día |
+
+Los intentos y el cumplimiento de fecha usan también la historia anterior a `desde` (una OTST que se cerró en el rango cuenta todos sus intentos).
 
 ## Cuando hagas un cambio
 

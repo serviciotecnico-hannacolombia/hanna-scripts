@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Llamada de Seguimiento Diagnóstico - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.4.0
+// @version      1.5.0
 // @description  En "Llamada de Seguimiento Diagnóstico" (OTST): deja por defecto "Contactar nuevamente, no fue posible establecer contacto", sugiere la fecha de próximo contacto (el primer día hábil con cupo según el Planificador de Llamadas; si no hay plan, hoy + 2 días hábiles) y muestra un calendario siempre abierto con atajos, festivos de Colombia y la carga de seguimientos de cada día. Si eliges "contacto efectivo" y das Continuar, pide confirmar que se cerrará la comunicación con la persona. Incluye mensajes rápidos guardables para la observación y llamada agrupada por cliente (encabezado "Orden relacionada con la OTST…"; las demás OTST del cliente se rellenan solas). Nunca presiona Continuar por ti.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosiscall*
@@ -214,6 +214,8 @@
       #ot-ls-grupo button:hover { background: #57319a; }
       #ot-ls-grupo .lg-nota { color: #6b7a8c; font-size: 11.5px; }
       #ot-ls-grupo .lg-ok { color: #2f855a; font-weight: 700; }
+      #ot-ls-prio { margin: 4px 0 10px; padding: 8px 12px; border: 1px solid #f1b8b0; border-left: 4px solid #c0392b; border-radius: 8px; background: #fff8f6; font-family: Arial, sans-serif; font-size: 13px; color: #a52a1a; }
+      #ot-ls-prio small { color: #6b7a8c; }
       #ot-ls-overlay { position: fixed; inset: 0; background: rgba(15,25,40,.55); z-index: 2147483000; display: flex; align-items: center; justify-content: center; }
       #ot-ls-modal { background: #fff; border-radius: 12px; padding: 24px 26px; max-width: 420px; width: calc(100% - 32px);
         box-shadow: 0 10px 40px rgba(0,0,0,.35); font-family: Arial, sans-serif; }
@@ -546,6 +548,25 @@
     pintar();
   }
 
+  // OTST marcada como prioritaria en la Agenda (p. ej. pedido de un asesor): se muestra el motivo
+  function asegurarPrioridad(select) {
+    if (document.getElementById('ot-ls-prio')) return;
+    const area = (select.form || document).querySelector('textarea');
+    const p = (leerJSON('hanna_pl_prioridades', {}) || {})[otstActual()];
+    if (!area || !p || p.estado !== 'activa') return;
+    const caja = document.createElement('div'); caja.id = 'ot-ls-prio';
+    const tit = document.createElement('b'); tit.textContent = '🚩 OTST prioritaria';
+    caja.append(tit, ` — ${p.nota || 'atención especial'}`);
+    if (p.por || p.ts) {
+      const quien = document.createElement('small');
+      const f = p.ts ? new Date(p.ts) : null;
+      quien.textContent = ` (marcada por ${p.por || '¿?'}${f ? ` el ${String(f.getDate()).padStart(2, '0')}/${String(f.getMonth() + 1).padStart(2, '0')}` : ''})`;
+      caja.append(quien);
+    }
+    const ref = document.getElementById('ot-ls-grupo') || document.getElementById('ot-ls-msgs') || document.getElementById('ot-ls-fila') || area.closest('.resizable-textarea, .form-textarea-wrapper') || area.parentElement;
+    ref.parentNode.insertBefore(caja, ref);
+  }
+
   function asegurarGrupo(select) {
     const area = (select.form || document).querySelector('textarea');
     if (!area || document.getElementById('ot-ls-grupo')) return;
@@ -676,6 +697,7 @@
     asegurarMensajes(select);
     asegurarCalendario(select);
     asegurarGrupo(select);
+    asegurarPrioridad(select);
   }
 
   preparar();

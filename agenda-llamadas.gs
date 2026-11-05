@@ -23,26 +23,50 @@
  *  6. Cada persona, en la Agenda de llamadas: ☁ Sheets -> pega URL, CLAVE y su nombre.
  *  7. Si cambias este código: Implementar -> Administrar implementaciones ->
  *     editar -> Versión nueva (la URL no cambia).
+ *
+ * DATOS EN JSON PARA OTRO SISTEMA (opcional)
+ *  Agrega la propiedad del script CLAVE_LECTURA (distinta de CLAVE: solo permite leer).
+ *  URL: <url /exec>?clave=CLAVE_LECTURA&desde=2026-11-01&hasta=2026-11-30
+ *  Opcional: &secciones=indicadores (o llamadas, resumen, prioritarias; separadas por coma).
+ *  Sin desde/hasta: últimos 30 días. Google responde con una redirección: hay que seguirla.
  */
 
-var VERSION = '1.1';
+var VERSION = '1.3';
 var ZONA = 'America/Bogota';
 var TOMADA_MIN = 20;   // una OTST "en llamada" se libera sola a los 20 min
 var ACTIVO_MIN = 30;   // personas conectadas en la última media hora
+var META_DIA = 40;     // llamadas por persona al día
+var TOPE_SEG = 10;     // llamadas de seguimiento (reprogramadas) por persona al día
+var MAX_DIAS_JSON = 370;
 
 var H_BITACORA = 'Bitácora';
 var H_RESUMEN = 'Resumen diario';
 var H_INDICADORES = 'Indicadores';
 var COLS_BITACORA = ['ID', 'Fecha y hora', 'Día', 'Usuario', 'OTST', 'Acción', 'Próximo contacto', 'Tipo', 'Cliente', 'Técnico', 'TS',
   'Grupo', 'Cuenta como llamada', 'OTST del grupo'];
+var H_PRIO = 'Prioritarias';
+var COLS_PRIO = ['OTST', 'Nota', 'Marcada por', 'Marcada el', 'Cliente', 'Técnico', 'Garantía', 'Estado OTST', 'Estado',
+  'Terminada por', 'Terminada el', 'TS'];
 var COLS_RESUMEN = ['Día', 'Actualizado', 'Reportado por', 'Pendientes', 'Vencidas', 'Para hoy', 'Agendadas', 'Sin contacto',
   'Entraron', 'Llamadas seguimiento', 'Llamadas nuevas', 'Salieron del estado', 'Días de cola seguimiento'];
 
 // ─────────────────────────────────────────────
 // Puntos de entrada
 // ─────────────────────────────────────────────
-function doGet() {
-  return respuestaJson_({ ok: true, mensaje: 'Agenda de llamadas activa', version: VERSION });
+// GET sin parámetros: prueba de que está activo.
+// GET ?clave=CLAVE_LECTURA&desde=yyyy-MM-dd&hasta=yyyy-MM-dd&secciones=llamadas,resumen,indicadores
+//   -> datos en JSON para otro sistema (solo lectura). Ver datos_().
+function doGet(e) {
+  var p = (e && e.parameter) || {};
+  if (!p.clave) return respuestaJson_({ ok: true, mensaje: 'Agenda de llamadas activa', version: VERSION });
+  var claveLectura = PropertiesService.getScriptProperties().getProperty('CLAVE_LECTURA');
+  if (!claveLectura) return respuestaJson_({ ok: false, error: 'Falta la propiedad del script CLAVE_LECTURA' });
+  if (String(p.clave) !== claveLectura) return respuestaJson_({ ok: false, error: 'Clave incorrecta' });
+  try {
+    return respuestaJson_(datos_(p));
+  } catch (err) {
+    return respuestaJson_({ ok: false, error: String(err) });
+  }
 }
 
 function doPost(e) {
@@ -133,11 +157,110 @@ function sincronizar_(datos, usuario) {
   // 4. Resumen del día (estado de la cola)
   if (datos.resumen && datos.resumen.dia) guardarResumen_(ss, datos.resumen, usuario);
 
+  // 5. OTST prioritarias (compartidas por todo el equipo)
+  var prio = leerPrio_(ss);
+  var prioOk = [];
+  (Array.isArray(datos.prioridades) ? datos.prioridades : []).slice(0, 50).forEach(function (op) {
+    var id = limpiar_(op && op.id);
+    if (!id) return;
+    prioOk.push(id);
+    if (prio.ops[id]) return;
+    prio.ops[id] = 1;
+    aplicarOpPrio_(ss, prio, op, usuario, ahora);
+  });
+  // Una prioritaria se da por atendida cuando alguien registra una llamada de esa OTST
+  filasNuevas.forEach(function (f) {
+    var p = prio.lista[f[4]];
+    if (p && p.estado === 'activa' && f[10] >= p.ts) terminarPrio_(ss, p, 'atendida', usuario, f[10]);
+  });
+  guardarPrio_(prio);
+
   guardarEstado_(hoy, estado);
   return {
     ok: true, version: VERSION, recibidos: recibidos,
     bitacora: estado.bitacora, tomadas: estado.tomadas, activos: estado.activos,
+    prioridades: prioridadesVisibles_(prio, hoy), prioOk: prioOk,
   };
+}
+
+// ─────────────────────────────────────────────
+// Prioritarias: hoja "Prioritarias" + caché { lista: { otst: {...} }, ops: { id: 1 } }
+// ─────────────────────────────────────────────
+function leerPrio_(ss) {
+  var txt = CacheService.getScriptCache().get('prioridades');
+  if (txt) {
+    try { return JSON.parse(txt); } catch (e) {}
+  }
+  var prio = { lista: {}, ops: {} };
+  var h = ss.getSheetByName(H_PRIO);
+  if (h && h.getLastRow() > 1) {
+    h.getRange(2, 1, h.getLastRow() - 1, COLS_PRIO.length).getValues().forEach(function (r, i) {
+      var otst = String(r[0] || '');
+      if (!otst) return;
+      var finTs = r[10] instanceof Date ? r[10].getTime() : Number(r[10]) || 0;
+      // Solo interesan las activas y las terminadas en los últimos 2 días
+      if (String(r[8]) !== 'activa' && Date.now() - finTs > 2 * 864e5) { delete prio.lista[otst]; return; }
+      prio.lista[otst] = { otst: otst, nota: String(r[1] || ''), por: String(r[2] || ''), ts: Number(r[11]) || (r[3] instanceof Date ? r[3].getTime() : 0),
+        cliente: String(r[4] || ''), tecnico: String(r[5] || ''), garantia: String(r[6]) === 'SI', estadoOT: String(r[7] || ''),
+        estado: String(r[8] || 'activa'), finPor: String(r[9] || ''), finTs: finTs, fila: i + 2 };
+    });
+  }
+  return prio;
+}
+
+function guardarPrio_(prio) {
+  var ids = Object.keys(prio.ops);
+  if (ids.length > 500) ids.slice(0, ids.length - 300).forEach(function (k) { delete prio.ops[k]; });
+  Object.keys(prio.lista).forEach(function (o) {
+    var p = prio.lista[o];
+    if (p.estado !== 'activa' && Date.now() - p.finTs > 2 * 864e5) delete prio.lista[o];
+  });
+  CacheService.getScriptCache().put('prioridades', JSON.stringify(prio), 21600);
+}
+
+function filaPrio_(p) {
+  return [p.otst, p.nota, p.por, new Date(p.ts), p.cliente, p.tecnico, p.garantia ? 'SI' : 'NO', p.estadoOT, p.estado,
+    p.finPor || '', p.finTs ? new Date(p.finTs) : '', p.ts];
+}
+
+function escribirPrio_(ss, p) {
+  var h = hoja_(ss, H_PRIO, COLS_PRIO);
+  // La fila guardada debe seguir siendo de esa OTST (por si alguien borró filas a mano)
+  if (!p.fila || p.fila > h.getLastRow() || String(h.getRange(p.fila, 1).getValue()) !== p.otst) p.fila = h.getLastRow() + 1;
+  h.getRange(p.fila, 1, 1, COLS_PRIO.length).setValues([filaPrio_(p)]);
+}
+
+function aplicarOpPrio_(ss, prio, op, usuario, ahora) {
+  var otst = limpiar_(op.otst).replace(/\D/g, '');
+  if (!otst) return;
+  var p = prio.lista[otst];
+  if (op.op === 'quitar') {
+    if (p && p.estado === 'activa') terminarPrio_(ss, p, 'quitada', usuario, ahora);
+    return;
+  }
+  if (op.op !== 'marcar') return;
+  var nueva = !p || p.estado !== 'activa';
+  p = { otst: otst, nota: limpiar_(op.nota), por: nueva ? usuario : p.por, ts: nueva ? Number(op.ts) || ahora : p.ts,
+    cliente: limpiar_(op.cliente) || (p && p.cliente) || '', tecnico: limpiar_(op.tecnico) || (p && p.tecnico) || '',
+    garantia: op.garantia === true || (!op.cliente && !!(p && p.garantia)), estadoOT: limpiar_(op.estadoOT) || (p && p.estadoOT) || '',
+    estado: 'activa', finPor: '', finTs: 0, fila: nueva ? 0 : p.fila };
+  prio.lista[otst] = p;
+  escribirPrio_(ss, p);
+}
+
+function terminarPrio_(ss, p, estado, usuario, ts) {
+  p.estado = estado; p.finPor = usuario; p.finTs = ts;
+  escribirPrio_(ss, p);
+}
+
+// Activas + terminadas hoy (para mostrarlas con ✅ el resto del día)
+function prioridadesVisibles_(prio, hoy) {
+  return Object.keys(prio.lista).map(function (o) { return prio.lista[o]; })
+    .filter(function (p) { return p.estado === 'activa' || (p.finTs && dia_(p.finTs) === hoy); })
+    .map(function (p) {
+      return { otst: p.otst, nota: p.nota, por: p.por, ts: p.ts, cliente: p.cliente, tecnico: p.tecnico, garantia: p.garantia,
+        estadoOT: p.estadoOT, estado: p.estado, finPor: p.finPor, finTs: p.finTs };
+    });
 }
 
 // Estado del día en caché (rápido). Si se pierde, se reconstruye la bitácora desde la hoja.
@@ -199,6 +322,266 @@ function guardarResumen_(ss, r, usuario) {
 }
 
 // ─────────────────────────────────────────────
+// Datos en JSON (doGet con CLAVE_LECTURA)
+// ─────────────────────────────────────────────
+// "efectiva" = se cerró el seguimiento (contacto efectivo); "reprogramada" = quedó otra
+// llamada agendada. Una "llamada" es una fila con "Cuenta como llamada" = 1 (un cliente
+// con varias OTST agrupadas = 1 llamada); "registros" son las OTST registradas.
+function datos_(p) {
+  var hoy = dia_(Date.now());
+  var hasta = /^\d{4}-\d{2}-\d{2}$/.test(p.hasta || '') ? p.hasta : hoy;
+  var desde = /^\d{4}-\d{2}-\d{2}$/.test(p.desde || '') ? p.desde : sumarDias_(hasta, -29);
+  if (desde > hasta) { var t = desde; desde = hasta; hasta = t; }
+  if (difDias_(desde, hasta) > MAX_DIAS_JSON) desde = sumarDias_(hasta, -MAX_DIAS_JSON);
+  var secciones = String(p.secciones || 'llamadas,resumen,indicadores,prioritarias').toLowerCase();
+  var quiere = function (s) { return secciones.indexOf(s) >= 0; };
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var todas = leerBitacora_(ss, hasta); // hasta "hasta" (para intentos y fechas hace falta lo anterior)
+  var enRango = todas.filter(function (l) { return l.dia >= desde; });
+  var resumen = leerResumen_(ss, desde, hasta);
+
+  var r = { ok: true, version: VERSION, generado: new Date().toISOString(), zona: ZONA, desde: desde, hasta: hasta,
+    meta: { llamadasPorDia: META_DIA, topeSeguimientoPorDia: TOPE_SEG } };
+  if (quiere('llamadas')) r.llamadas = enRango.map(function (l) {
+    return { id: l.id, fecha: l.fecha, dia: l.dia, hora: l.hora, usuario: l.usuario, otst: l.otst, accion: l.accion,
+      proximo: l.proximo, tipo: l.tipo, seguimiento: l.seguimiento, cliente: l.cliente, tecnico: l.tecnico,
+      grupo: l.grupo, cuenta: l.cuenta, otsts: l.otsts };
+  });
+  if (quiere('resumen')) r.resumen = resumen;
+  if (quiere('prioritarias')) r.prioritarias = leerPrioritarias_(ss, desde, hasta);
+  if (quiere('indicadores')) r.indicadores = indicadores_(todas, enRango, resumen, desde, hasta);
+  return r;
+}
+
+function leerBitacora_(ss, hasta) {
+  var hb = ss.getSheetByName(H_BITACORA);
+  if (!hb || hb.getLastRow() < 2) return [];
+  var filas = hb.getRange(2, 1, hb.getLastRow() - 1, COLS_BITACORA.length).getValues();
+  var out = [];
+  filas.forEach(function (r) {
+    if (!r[0] || !r[4]) return;
+    var ts = Number(r[10]) || (r[1] instanceof Date ? r[1].getTime() : 0);
+    var dia = diaTxt_(r[2]) || (ts ? dia_(ts) : '');
+    if (!dia || dia > hasta) return;
+    var tipo = String(r[7] || '');
+    out.push({
+      id: String(r[0]), ts: ts, fecha: ts ? Utilities.formatDate(new Date(ts), ZONA, "yyyy-MM-dd'T'HH:mm:ssXXX") : '',
+      dia: dia, hora: ts ? Number(Utilities.formatDate(new Date(ts), ZONA, 'H')) : null,
+      usuario: String(r[3] || ''), otst: String(r[4]), accion: String(r[5] || ''), proximo: diaTxt_(r[6]),
+      tipo: tipo, seguimiento: tipo !== '' && tipo !== 'nueva', cliente: String(r[8] || ''), tecnico: String(r[9] || ''),
+      grupo: String(r[11] || ''), cuenta: r[12] === '' || r[12] === null ? 1 : Number(r[12]) || 0,
+      otsts: String(r[13] || '').split(/\s*,\s*/).filter(String),
+    });
+  });
+  out.sort(function (a, b) { return a.ts - b.ts; });
+  return out;
+}
+
+// Prioritarias marcadas en el rango, con horas hasta que se atendieron
+function leerPrioritarias_(ss, desde, hasta) {
+  var h = ss.getSheetByName(H_PRIO);
+  if (!h || h.getLastRow() < 2) return [];
+  return h.getRange(2, 1, h.getLastRow() - 1, COLS_PRIO.length).getValues()
+    .map(function (r) {
+      var ts = Number(r[11]) || (r[3] instanceof Date ? r[3].getTime() : 0);
+      var fin = r[10] instanceof Date ? r[10].getTime() : 0;
+      return { otst: String(r[0] || ''), nota: String(r[1] || ''), marcadaPor: String(r[2] || ''), marcada: ts ? dia_(ts) : '',
+        cliente: String(r[4] || ''), tecnico: String(r[5] || ''), garantia: String(r[6]) === 'SI', estadoOT: String(r[7] || ''),
+        estado: String(r[8] || ''), terminadaPor: String(r[9] || ''), terminada: fin ? dia_(fin) : '',
+        horasHastaAtender: String(r[8]) === 'atendida' && fin && ts ? Math.round(((fin - ts) / 36e5) * 10) / 10 : null };
+    })
+    .filter(function (p) { return p.otst && p.marcada >= desde && p.marcada <= hasta; });
+}
+
+function leerResumen_(ss, desde, hasta) {
+  var hr = ss.getSheetByName(H_RESUMEN);
+  if (!hr || hr.getLastRow() < 2) return [];
+  return hr.getRange(2, 1, hr.getLastRow() - 1, COLS_RESUMEN.length).getValues()
+    .map(function (r) {
+      var n = function (v) { return v === '' || v === null ? null : Number(v); };
+      return { dia: diaTxt_(r[0]), reportadoPor: String(r[2] || ''), pendientes: n(r[3]), vencidas: n(r[4]), paraHoy: n(r[5]),
+        agendadas: n(r[6]), sinContacto: n(r[7]), entraron: n(r[8]), llamadasSeguimiento: n(r[9]), llamadasNuevas: n(r[10]),
+        salieron: n(r[11]), diasColaSeguimiento: n(r[12]),
+        flujoNeto: r[8] === '' || r[11] === '' ? null : Number(r[8]) - Number(r[11]) };
+    })
+    .filter(function (x) { return x.dia && x.dia >= desde && x.dia <= hasta; })
+    .sort(function (a, b) { return a.dia < b.dia ? -1 : 1; });
+}
+
+function indicadores_(todas, enRango, resumen, desde, hasta) {
+  var pct = function (a, b) { return b ? Math.round((a / b) * 1000) / 10 : null; };
+  var red = function (v) { return v === null || isNaN(v) ? null : Math.round(v * 100) / 100; };
+  var cuenta = function (lista, f) { return lista.filter(f).length; };
+  var efectiva = function (l) { return l.accion === 'efectiva'; };
+  var reprog = function (l) { return l.accion === 'reprogramada'; };
+  var esLlamada = function (l) { return l.cuenta === 1; };
+
+  // 1. Por día y persona vs meta
+  var dp = {};
+  enRango.forEach(function (l) {
+    var k = l.dia + '|' + l.usuario;
+    var x = dp[k] || (dp[k] = { dia: l.dia, usuario: l.usuario, llamadas: 0, otst: 0, efectivas: 0, reprogramadas: 0,
+      llamadasSeguimiento: 0, llamadasNuevas: 0 });
+    x.otst++;
+    if (efectiva(l)) x.efectivas++;
+    if (reprog(l)) x.reprogramadas++;
+    if (esLlamada(l)) { x.llamadas++; if (l.seguimiento) x.llamadasSeguimiento++; else x.llamadasNuevas++; }
+  });
+  var porDiaPersona = Object.keys(dp).sort().map(function (k) {
+    var x = dp[k];
+    x.cumplimientoMeta = pct(x.llamadas, META_DIA);
+    x.superaTopeSeguimiento = x.llamadasSeguimiento > TOPE_SEG;
+    return x;
+  });
+
+  // 2. Por persona en el periodo
+  var pp = {};
+  porDiaPersona.forEach(function (x) {
+    var y = pp[x.usuario] || (pp[x.usuario] = { usuario: x.usuario, dias: 0, llamadas: 0, otst: 0, efectivas: 0, reprogramadas: 0,
+      diasEnMeta: 0, diasSobreTopeSeguimiento: 0 });
+    y.dias++; y.llamadas += x.llamadas; y.otst += x.otst; y.efectivas += x.efectivas; y.reprogramadas += x.reprogramadas;
+    if (x.llamadas >= META_DIA) y.diasEnMeta++;
+    if (x.superaTopeSeguimiento) y.diasSobreTopeSeguimiento++;
+  });
+  var porPersona = Object.keys(pp).sort().map(function (k) {
+    var y = pp[k];
+    y.promedioLlamadasDia = red(y.llamadas / y.dias);
+    y.cumplimientoMeta = pct(y.llamadas, y.dias * META_DIA);
+    y.pctEfectivas = pct(y.efectivas, y.otst);
+    return y;
+  });
+
+  // 3. Intentos hasta cierre y cumplimiento de la fecha agendada (con la historia anterior al rango)
+  var intentos = {}, pendiente = {}, cierres = [];
+  var fechas = { evaluadas: 0, aTiempo: 0, antes: 0, tarde: 0, sumaAtraso: 0, maxAtraso: 0 };
+  todas.forEach(function (l) {
+    var prev = pendiente[l.otst];
+    if (prev && prev.proximo && l.dia >= desde) {
+      var atraso = difDias_(prev.proximo, l.dia);
+      fechas.evaluadas++;
+      if (atraso === 0) fechas.aTiempo++;
+      else if (atraso < 0) fechas.antes++;
+      else { fechas.tarde++; fechas.sumaAtraso += atraso; fechas.maxAtraso = Math.max(fechas.maxAtraso, atraso); }
+    }
+    intentos[l.otst] = (intentos[l.otst] || 0) + 1;
+    if (efectiva(l)) {
+      if (l.dia >= desde) cierres.push({ otst: l.otst, cliente: l.cliente, tecnico: l.tecnico, intentos: intentos[l.otst], dia: l.dia });
+      intentos[l.otst] = 0;
+      delete pendiente[l.otst];
+    } else {
+      pendiente[l.otst] = l;
+    }
+  });
+  var dist = { '1': 0, '2': 0, '3': 0, '4+': 0 };
+  cierres.forEach(function (c) { dist[c.intentos >= 4 ? '4+' : String(c.intentos)]++; });
+  var abiertasConMasIntentos = Object.keys(pendiente)
+    .filter(function (o) { return intentos[o] >= 3; })
+    .map(function (o) { var l = pendiente[o]; return { otst: o, cliente: l.cliente, tecnico: l.tecnico, intentos: intentos[o], ultimoIntento: l.dia, proximo: l.proximo }; })
+    .sort(function (a, b) { return b.intentos - a.intentos; }).slice(0, 30);
+
+  // 4. Por técnico y por cliente
+  var agrupar = function (campo) {
+    var m = {};
+    enRango.forEach(function (l) {
+      var k = l[campo] || '(sin dato)';
+      var x = m[k] || (m[k] = { nombre: k, otst: {}, registros: 0, llamadas: 0, efectivas: 0, reprogramadas: 0, grupos: {} });
+      x.otst[l.otst] = 1; x.registros++;
+      if (esLlamada(l)) x.llamadas++;
+      if (efectiva(l)) x.efectivas++;
+      if (reprog(l)) x.reprogramadas++;
+      if (l.grupo) x.grupos[l.grupo] = 1;
+    });
+    return Object.keys(m).map(function (k) {
+      var x = m[k];
+      return { nombre: x.nombre, otstDistintas: Object.keys(x.otst).length, registros: x.registros, llamadas: x.llamadas,
+        efectivas: x.efectivas, reprogramadas: x.reprogramadas, pctEfectivas: pct(x.efectivas, x.registros),
+        intentosPorOtst: red(x.registros / Object.keys(x.otst).length), gruposAgrupados: Object.keys(x.grupos).length };
+    }).sort(function (a, b) { return b.otstDistintas - a.otstDistintas || b.registros - a.registros; });
+  };
+
+  // 5. Por hora del día
+  var ph = {};
+  enRango.forEach(function (l) {
+    if (l.hora === null) return;
+    var x = ph[l.hora] || (ph[l.hora] = { hora: l.hora, registros: 0, llamadas: 0, efectivas: 0 });
+    x.registros++;
+    if (esLlamada(l)) x.llamadas++;
+    if (efectiva(l)) x.efectivas++;
+  });
+  var porHora = Object.keys(ph).map(function (k) { var x = ph[k]; x.pctEfectivas = pct(x.efectivas, x.registros); return x; })
+    .sort(function (a, b) { return a.hora - b.hora; });
+
+  // 6. Cola (Resumen diario)
+  var conDato = function (campo) { return resumen.filter(function (x) { return x[campo] !== null; }); };
+  var prom = function (campo) { var l = conDato(campo); return l.length ? red(l.reduce(function (s, x) { return s + x[campo]; }, 0) / l.length) : null; };
+  var suma = function (campo) { return conDato(campo).reduce(function (s, x) { return s + x[campo]; }, 0); };
+  var primero = resumen[0], ultimo = resumen[resumen.length - 1];
+
+  var llamadas = cuenta(enRango, esLlamada);
+  var efectivas = cuenta(enRango, efectiva);
+  var reprogramadas = cuenta(enRango, reprog);
+  var dias = {};
+  enRango.forEach(function (l) { dias[l.dia] = 1; });
+  return {
+    totales: {
+      diasConLlamadas: Object.keys(dias).length, personas: porPersona.length,
+      llamadas: llamadas, otstRegistradas: enRango.length, otstDistintas: Object.keys(enRango.reduce(function (m, l) { m[l.otst] = 1; return m; }, {})).length,
+      llamadasSeguimiento: cuenta(enRango, function (l) { return esLlamada(l) && l.seguimiento; }),
+      llamadasNuevas: cuenta(enRango, function (l) { return esLlamada(l) && !l.seguimiento; }),
+      efectivas: efectivas, reprogramadas: reprogramadas, otrasAcciones: enRango.length - efectivas - reprogramadas,
+      pctEfectivas: pct(efectivas, enRango.length), pctReprogramadas: pct(reprogramadas, enRango.length),
+      otstPorLlamada: red(llamadas ? enRango.length / llamadas : null),
+      llamadasAhorradasPorAgrupacion: enRango.length - llamadas,
+    },
+    porDiaPersona: porDiaPersona,
+    porPersona: porPersona,
+    intentosHastaCierre: {
+      cierres: cierres.length,
+      promedio: red(cierres.length ? cierres.reduce(function (s, c) { return s + c.intentos; }, 0) / cierres.length : null),
+      distribucion: dist,
+      cierresDificiles: cierres.filter(function (c) { return c.intentos >= 4; }).sort(function (a, b) { return b.intentos - a.intentos; }).slice(0, 30),
+      abiertasConMasIntentos: abiertasConMasIntentos,
+    },
+    cumplimientoFecha: {
+      evaluadas: fechas.evaluadas, enLaFecha: fechas.aTiempo, antes: fechas.antes, tarde: fechas.tarde,
+      pctATiempo: pct(fechas.aTiempo + fechas.antes, fechas.evaluadas),
+      promedioDiasAtraso: red(fechas.tarde ? fechas.sumaAtraso / fechas.tarde : null), maxDiasAtraso: fechas.maxAtraso,
+    },
+    cola: {
+      dias: resumen.length,
+      pendientesInicio: primero ? primero.pendientes : null, pendientesFin: ultimo ? ultimo.pendientes : null,
+      vencidasFin: ultimo ? ultimo.vencidas : null, promedioVencidas: prom('vencidas'),
+      entraron: suma('entraron'), salieron: suma('salieron'), flujoNeto: suma('entraron') - suma('salieron'),
+      diasColaSeguimientoFin: ultimo ? ultimo.diasColaSeguimiento : null, promedioDiasColaSeguimiento: prom('diasColaSeguimiento'),
+    },
+    porTecnico: agrupar('tecnico'),
+    porCliente: agrupar('cliente').slice(0, 50),
+    porHora: porHora,
+  };
+}
+
+function diaTxt_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, ZONA, 'yyyy-MM-dd');
+  var s = String(v || '').trim();
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[0];
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); // dd/MM/yyyy
+  return m ? m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2) : '';
+}
+
+function difDias_(a, b) { // días de a hasta b (yyyy-MM-dd)
+  var u = function (s) { var p = s.split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]); };
+  return Math.round((u(b) - u(a)) / 86400000);
+}
+
+function sumarDias_(s, n) {
+  var p = s.split('-');
+  var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]) + n * 86400000);
+  return d.toISOString().slice(0, 10);
+}
+
+// ─────────────────────────────────────────────
 // Configuración del Sheet (ejecutar una vez desde el editor)
 // ─────────────────────────────────────────────
 function configurar() {
@@ -215,6 +598,12 @@ function configurar() {
     var rango = hb.getRange(2, 13, hb.getLastRow() - 1, 1);
     rango.setValues(rango.getValues().map(function (v) { return [v[0] === '' ? 1 : v[0]]; }));
   }
+
+  var hp = hoja_(ss, H_PRIO, COLS_PRIO);
+  hp.getRange('A:A').setNumberFormat('@');
+  hp.getRange('D:D').setNumberFormat('dd/MM/yyyy HH:mm');
+  hp.getRange('K:K').setNumberFormat('dd/MM/yyyy HH:mm');
+  hp.hideColumns(12);
 
   var hr = hoja_(ss, H_RESUMEN, COLS_RESUMEN);
   hr.getRange('A:A').setNumberFormat('@');
