@@ -503,6 +503,7 @@ Con el Apps Script `agenda-llamadas.gs` la agenda guarda cada llamada en un Goog
 - **Cola compartida en tiempo casi real** (cada 20 s y al volver a la pestaña): lo que llama otra persona sale de tu lista y aparece ✅ en el avance del equipo.
 - Al dar **📞 Llamar** la OTST queda **🔒 en llamada** con tu nombre para los demás (se libera sola a los 20 min o al registrar la llamada). Debajo de tu lista ves las que otros están llamando, con **Llamar igual** por si hace falta.
 - Arriba: **🟢 En línea con …** (quién está conectado) o **🔴 Sin Sheet** si falla (la agenda sigue funcionando sola).
+- **🏁 Carrera del día** (con 2 o más personas): debajo de los indicadores, cada persona con su barra hacia su meta (su cupo diario), 🥇🥈🥉, quién va ganando y por cuántas llamadas, seguimiento/nuevas, efectivas, ritmo por hora y hace cuánto fue su última llamada. Cuenta llamadas (un cliente agrupado = 1); en empate gana quien llegó primero a ese número. 🏆 al llegar a la meta.
 - El cupo es **por persona** (⚙️ Cupos en cada navegador); la proyección de nuevas suma el cupo de todas las personas conectadas.
 - En el Sheet:
   - **Bitácora**: una fila por OTST registrada (fecha y hora, persona, OTST, Efectiva/Reprogramada, próximo contacto, tipo, cliente, técnico, grupo, *Cuenta como llamada* 1/0, OTST del grupo).

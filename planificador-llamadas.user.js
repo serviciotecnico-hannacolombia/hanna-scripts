@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Planificador de Llamadas de Seguimiento - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.5.0
+// @version      1.6.0
 // @description  En el Libro de Trabajo y en la Agenda rápida (/stecnico/agenda-llamadas): arma tu lista de llamadas del día con tu cupo (p. ej. 40 = máx. 10 de seguimiento [vencidas/reprogramadas] + el resto nuevas sin contacto) y filtro "Mis técnicos", muestra la carga de los próximos días hábiles (con festivos de Colombia), alertas, envejecimiento y avance. La Agenda abre al instante con la última lista guardada y actualiza el Libro de Trabajo en segundo plano. Opcional: se sincroniza con un Google Sheet (Apps Script) para guardar la bitácora y los indicadores, y para que varias personas llamen desde la misma cola sin repetir OTST. Solo lee la intranet: nunca cambia fechas ni envía formularios.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/libro_trabajo*
@@ -20,7 +20,7 @@
   'use strict';
 
   // Debe coincidir siempre con @version del header de arriba.
-  const VERSION = '1.5.0';
+  const VERSION = '1.6.0';
   const SYNC_CADA_MS = 20 * 1000;    // Sheet: cada cuánto se consulta la cola compartida (pestaña visible)
   const TOMADA_MIN = 20;             // una OTST "tomada" se libera sola a los 20 min si no se registra la llamada
   const URL_AGENDA = '/stecnico/agenda-llamadas';
@@ -550,8 +550,26 @@
       #hpl.agenda .hpl-top { cursor: default; }
       /* En la Agenda la lista de hoy va justo debajo de los indicadores */
       #hpl.agenda .hpl-body { display: flex; flex-direction: column; }
-      #hpl.agenda .hpl-kpis { order: -2; }
+      #hpl.agenda .hpl-kpis { order: -3; }
+      #hpl.agenda .hpl-carrera { order: -2; }
       #hpl.agenda .hpl-lista-card { order: -1; margin-bottom: 12px; }
+      #hpl .hpl-carrera { margin-bottom: 12px; background: linear-gradient(180deg, #fbfdff, #fff); }
+      #hpl .hpl-carrera h4 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+      #hpl .hpl-carrera h4 .tit { font-weight: 400; color: #1f2d3d; font-size: 12.5px; }
+      #hpl .corredor { display: grid; grid-template-columns: 26px 130px 1fr 58px; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 5px 4px; border-radius: 6px; }
+      #hpl .corredor + .corredor { border-top: 1px dashed #e2e8f0; }
+      #hpl .corredor.yo { background: #f3f8fd; }
+      #hpl .corredor .pos { font-size: 16px; text-align: center; grid-row: span 2; }
+      #hpl .corredor .nom { font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #hpl .corredor .nom small { font-weight: 400; color: #6b7a8c; }
+      #hpl .corredor .pista { position: relative; height: 16px; background: repeating-linear-gradient(90deg, #eef2f7 0 18px, #e5ebf2 18px 36px); border-radius: 8px; margin-right: 18px; }
+      #hpl .corredor .pista > i { display: block; height: 100%; border-radius: 8px; background: linear-gradient(90deg, #8fc1f0, #0b6fd6); transition: width .6s; }
+      #hpl .corredor.lider .pista > i { background: linear-gradient(90deg, #f6d36b, #e0a800); }
+      #hpl .corredor .auto { position: absolute; top: -5px; transform: translateX(-50%) scaleX(-1); font-size: 18px; line-height: 1; transition: left .6s; }
+      #hpl .corredor .meta { position: absolute; right: -18px; top: -2px; font-size: 14px; }
+      #hpl .corredor .cnt { text-align: right; font-size: 12px; color: #6b7a8c; }
+      #hpl .corredor .cnt b { font-size: 17px; color: #0b3d78; }
+      #hpl .corredor .det { grid-column: 2 / 5; font-size: 11px; color: #6b7a8c; }
       #hpl .hpl-cargando { font-size: 14px; color: #6b7a8c; margin: 20px 0; }
       #hpl .hpl-body { padding: 12px 14px; }
       #hpl.cerrado .hpl-body { display: none; }
@@ -701,6 +719,26 @@
       contadas.add(n + '|' + llamadaDe(e));
       porPersona[n] = (porPersona[n] || 0) + 1;
     });
+
+    // ── Carrera del día: llamadas de cada persona (un cliente agrupado = 1) hacia su meta ──
+    const corredores = {};
+    const corredor = (n) => (corredores[n] = corredores[n] || { n, llamadas: new Set(), seg: new Set(), efectivas: 0, otst: 0, primera: Infinity, ultima: 0 });
+    Object.values(ultimaDe).forEach((e) => {
+      if (e.sinRegistro) return;
+      const c = corredor(e.usuario || yo || 'Tú');
+      const k = llamadaDe(e);
+      c.llamadas.add(k);
+      c.otst++;
+      if ((e.tipo || tipoIni(e.otst)) !== 'nueva') c.seg.add(k);
+      if (e.accion === 'efectiva') c.efectivas++;
+      const ts = new Date(e.ts).getTime();
+      if (ts) { c.primera = Math.min(c.primera, ts); c.ultima = Math.max(c.ultima, ts); }
+    });
+    activos.forEach(([n]) => corredor(n)); // conectadas aunque aún no hayan llamado
+    const metaDe = (n) => +((remoto.activos || {})[n] || {}).cupoTotal || (n === (yo || 'Tú') ? cfg.cupoTotal : CFG_DEF.cupoTotal);
+    // Más llamadas primero; empate: quien llegó primero a ese número
+    const carrera = Object.values(corredores).map((c) => ({ ...c, total: c.llamadas.size, meta: metaDe(c.n) }))
+      .sort((a, b) => b.total - a.total || a.ultima - b.ultima);
 
     // Clientes con varias OTST abiertas (se atienden todas en la misma llamada)
     const porCliente = {};
@@ -934,6 +972,35 @@
     const equipoTxt = Object.keys(porPersona).length > 1 || (sync && activos.length > 1)
       ? `<div class="l">Equipo hoy: ${Object.entries(porPersona).map(([p, c]) => `${esc(p)} ${c}`).join(' · ') || '0'}</div>` : '';
 
+    // Panel de la carrera (solo con 2 o más personas)
+    let bloqueCarrera = '';
+    if (carrera.length >= 2) {
+      const [l1, l2] = carrera;
+      const llegaron = carrera.filter((c) => c.total >= c.meta);
+      const llam = (n) => `${n} llamada${n === 1 ? '' : 's'}`;
+      const titular = !l1.total ? 'Arranca la carrera: nadie ha llamado todavía'
+        : llegaron.length ? `🏆 ${llegaron.map((c) => esc(c.n)).join(' y ')} ${llegaron.length > 1 ? 'llegaron' : 'llegó'} a la meta`
+        : l1.total === l2.total ? `Empate: ${carrera.filter((c) => c.total === l1.total).map((c) => esc(c.n)).join(' y ')} con ${llam(l1.total)}`
+        : `Va ganando <b>${esc(l1.n)}</b> por ${llam(l1.total - l2.total)}`;
+      const medalla = (i, c) => (!c.total ? `${i + 1}` : ['🥇', '🥈', '🥉'][i] || `${i + 1}`);
+      const yoN = yo || 'Tú';
+      const filasCarrera = carrera.map((c, i) => {
+        const pct = Math.min(100, (c.total / c.meta) * 100);
+        const horas = c.primera < Infinity ? (Date.now() - c.primera) / 36e5 : 0;
+        const ritmo = c.total >= 2 && horas > 0 ? (c.total / Math.max(0.25, horas)).toFixed(1).replace('.', ',') : null;
+        const det = [`${c.seg.size} seg · ${c.total - c.seg.size} nuevas`, `${c.efectivas} efectivas`,
+          c.otst > c.total ? `${c.otst} OTST` : '', ritmo ? `${ritmo}/h` : '', c.ultima ? `última ${haceTexto(c.ultima)}` : 'sin llamadas'].filter(Boolean).join(' · ');
+        return `<div class="corredor${c.n === yoN ? ' yo' : ''}${i === 0 && c.total ? ' lider' : ''}">
+          <span class="pos">${medalla(i, c)}</span>
+          <span class="nom" title="${esc(c.n)}">${esc(c.n)}${c.n === yoN ? ' <small>(tú)</small>' : ''}</span>
+          <div class="pista"><i style="width:${pct}%"></i><span class="auto" style="left:${pct}%">${c.total >= c.meta ? '🏆' : '🏃'}</span><span class="meta">🏁</span></div>
+          <span class="cnt"><b>${c.total}</b>/${c.meta}</span>
+          <span class="det">${det}</span>
+        </div>`;
+      }).join('');
+      bloqueCarrera = `<div class="hpl-card hpl-carrera"><h4>🏁 Carrera del día <span class="tit">${titular}</span></h4>${filasCarrera}</div>`;
+    }
+
     const sugerida = deClave(plan.sugerida);
     const html = `
       <div class="hpl-top">
@@ -950,6 +1017,7 @@
           <div class="hpl-kpi"><div class="v">${nAg}</div><div class="l">Agendadas a futuro</div></div>
           <div class="hpl-kpi ${diasColaSeg > 5 ? 'rojo' : diasColaSeg > 2 ? 'ambar' : 'verde'}"><div class="v">${diasColaSeg} d</div><div class="l">Cola de seguimiento (días hábiles, hasta ${corta(plan.ultimoSeg)})</div></div>
         </div>
+        ${bloqueCarrera}
         <ul class="hpl-alertas">${alertas.map(([c, t]) => `<li class="${c}">${t}</li>`).join('')}</ul>
         <div class="hpl-grid2">
           <div class="hpl-card">
