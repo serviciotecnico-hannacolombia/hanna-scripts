@@ -31,7 +31,7 @@
  *  Sin desde/hasta: últimos 30 días. Google responde con una redirección: hay que seguirla.
  */
 
-var VERSION = '1.3';
+var VERSION = '1.4';
 var ZONA = 'America/Bogota';
 var TOMADA_MIN = 20;   // una OTST "en llamada" se libera sola a los 20 min
 var ACTIVO_MIN = 30;   // personas conectadas en la última media hora
@@ -48,7 +48,7 @@ var H_PRIO = 'Prioritarias';
 var COLS_PRIO = ['OTST', 'Nota', 'Marcada por', 'Marcada el', 'Cliente', 'Técnico', 'Garantía', 'Estado OTST', 'Estado',
   'Terminada por', 'Terminada el', 'TS'];
 var COLS_RESUMEN = ['Día', 'Actualizado', 'Reportado por', 'Pendientes', 'Vencidas', 'Para hoy', 'Agendadas', 'Sin contacto',
-  'Entraron', 'Llamadas seguimiento', 'Llamadas nuevas', 'Salieron del estado', 'Días de cola seguimiento'];
+  'Entraron', 'Llamadas seguimiento', 'Llamadas nuevas', 'Salieron del estado', 'Días de cola seguimiento', 'Más de 8 semanas'];
 
 // ─────────────────────────────────────────────
 // Puntos de entrada
@@ -305,7 +305,7 @@ function guardarEstado_(hoy, estado) {
 function guardarResumen_(ss, r, usuario) {
   var hr = hoja_(ss, H_RESUMEN, COLS_RESUMEN);
   var fila = [limpiar_(r.dia), new Date(), usuario, num_(r.total), num_(r.vencidas), num_(r.hoy), num_(r.agendadas),
-    num_(r.sinContacto), num_(r.entradas), num_(r.hechasSeg), num_(r.hechasNuevas), num_(r.cerradas), num_(r.colaDias)];
+    num_(r.sinContacto), num_(r.entradas), num_(r.hechasSeg), num_(r.hechasNuevas), num_(r.cerradas), num_(r.colaDias), num_(r.viejas)];
   var ultima = hr.getLastRow();
   if (ultima > 1) {
     // Se actualiza la fila del día (buscando desde el final)
@@ -402,7 +402,7 @@ function leerResumen_(ss, desde, hasta) {
       var n = function (v) { return v === '' || v === null ? null : Number(v); };
       return { dia: diaTxt_(r[0]), reportadoPor: String(r[2] || ''), pendientes: n(r[3]), vencidas: n(r[4]), paraHoy: n(r[5]),
         agendadas: n(r[6]), sinContacto: n(r[7]), entraron: n(r[8]), llamadasSeguimiento: n(r[9]), llamadasNuevas: n(r[10]),
-        salieron: n(r[11]), diasColaSeguimiento: n(r[12]),
+        salieron: n(r[11]), diasColaSeguimiento: n(r[12]), masDe8Semanas: n(r[13]),
         flujoNeto: r[8] === '' || r[11] === '' ? null : Number(r[8]) - Number(r[11]) };
     })
     .filter(function (x) { return x.dia && x.dia >= desde && x.dia <= hasta; })
@@ -554,6 +554,7 @@ function indicadores_(todas, enRango, resumen, desde, hasta) {
       vencidasFin: ultimo ? ultimo.vencidas : null, promedioVencidas: prom('vencidas'),
       entraron: suma('entraron'), salieron: suma('salieron'), flujoNeto: suma('entraron') - suma('salieron'),
       diasColaSeguimientoFin: ultimo ? ultimo.diasColaSeguimiento : null, promedioDiasColaSeguimiento: prom('diasColaSeguimiento'),
+      masDe8SemanasInicio: primero ? primero.masDe8Semanas : null, masDe8SemanasFin: ultimo ? ultimo.masDe8Semanas : null,
     },
     porTecnico: agrupar('tecnico'),
     porCliente: agrupar('cliente').slice(0, 50),

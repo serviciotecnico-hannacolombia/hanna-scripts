@@ -477,6 +477,12 @@ Para cuando un asesor pide llamar a un cliente con atención especial:
 - En la Llamada de Seguimiento de esa OTST aparece el aviso **🚩 OTST prioritaria** con el motivo.
 - Con ☁ Sheets las prioritarias se comparten con todo el equipo (hoja **Prioritarias**: quién la marcó, cuándo y quién la atendió).
 
+### OTST estancadas (más de 8 semanas)
+
+La alerta amarilla "N OTST con más de 8 semanas en este estado" (según la columna *Tiempo*) muestra las 6 más antiguas; **Ver las N** despliega todas con cliente, técnico, semanas en el estado, próximo contacto y cuántas llamadas conoce la agenda (las de este navegador + las del equipo de hoy; el historial completo está en la Bitácora del Sheet). **⬇ CSV para cierre** las descarga con el link de cada OTST, para decidir con el jefe o el asesor el cierre o la disposición final. Las 8 semanas se cambian en `alertaSemanas` de la configuración. La cantidad se guarda cada día (columna *Más de 8 sem* de la tendencia y del Resumen diario del Sheet).
+
+En el gráfico de carga, la barra de hoy descuenta los seguimientos que el equipo ya llamó hoy (en gris, `7+3✓`): el cupo de hoy es lo que falta, no 10 completos.
+
 La tendencia y el promedio de OTST que entran por día se vuelven exactos con unos días de uso (antes se estiman con la columna *Tiempo*).
 
 ### Agenda rápida: `https://intranet.hannacolombia.com/stecnico/agenda-llamadas`
@@ -500,7 +506,7 @@ Con el Apps Script `agenda-llamadas.gs` la agenda guarda cada llamada en un Goog
 - El cupo es **por persona** (⚙️ Cupos en cada navegador); la proyección de nuevas suma el cupo de todas las personas conectadas.
 - En el Sheet:
   - **Bitácora**: una fila por OTST registrada (fecha y hora, persona, OTST, Efectiva/Reprogramada, próximo contacto, tipo, cliente, técnico, grupo, *Cuenta como llamada* 1/0, OTST del grupo).
-  - **Resumen diario**: el estado de la cola cada día (pendientes, vencidas, sin contacto, entraron, llamadas, días de cola) + gráfico.
+  - **Resumen diario**: el estado de la cola cada día (pendientes, vencidas, sin contacto, entraron, llamadas, días de cola, más de 8 semanas) + gráfico.
   - **Prioritarias**: OTST marcadas con 🚩 (motivo, quién y cuándo la marcó, activa/atendida/quitada y quién la terminó).
   - **Indicadores**: llamadas por día y persona (un grupo = 1), OTST registradas por día y persona, resultado por persona y por técnico, OTST por tipo, OTST con más intentos.
 
@@ -510,7 +516,7 @@ Con el Apps Script `agenda-llamadas.gs` la agenda guarda cada llamada en un Goog
 2. En el Sheet: **Extensiones → Apps Script**. Borra lo que haya y pega el contenido de `agenda-llamadas.gs`.
 3. **Configuración del proyecto (⚙) → Propiedades del script → Agregar**: `CLAVE` = una clave secreta larga que te inventes.
 4. Arriba elige la función **configurar** y dale **▶ Ejecutar** (acepta los permisos). Crea las hojas Bitácora, Resumen diario e Indicadores.
-5. **Implementar → Nueva implementación → Aplicación web**: *Ejecutar como*: Yo · *Quién tiene acceso*: Cualquier usuario. Copia la URL que termina en `/exec` (abierta en el navegador debe mostrar `"version":"1.3"`).
+5. **Implementar → Nueva implementación → Aplicación web**: *Ejecutar como*: Yo · *Quién tiene acceso*: Cualquier usuario. Copia la URL que termina en `/exec` (abierta en el navegador debe mostrar `"version":"1.4"`).
 
 **Cada persona:** en la Agenda de llamadas → **☁ Sheets** → pega la URL, la CLAVE y escribe su nombre (así la ven los demás). Para desconectarte deja la URL vacía. Tampermonkey pedirá permiso para conectarse a `script.google.com` la primera vez: elige *Permitir siempre*.
 
@@ -537,7 +543,7 @@ Respuesta:
 | `indicadores.porDiaPersona` / `porPersona` | Llamadas vs meta de 40 (`cumplimientoMeta` en %), `superaTopeSeguimiento` (más de 10 reprogramadas), días en meta |
 | `indicadores.intentosHastaCierre` | Promedio y distribución (1, 2, 3, 4+) de llamadas hasta el contacto efectivo; cierres difíciles y OTST abiertas con 3+ intentos |
 | `indicadores.cumplimientoFecha` | Si la llamada siguiente se hizo en la fecha agendada, antes o tarde; % a tiempo y días de atraso |
-| `indicadores.cola` | Pendientes al inicio y al final, vencidas, entraron/salieron y días de cola del periodo |
+| `indicadores.cola` | Pendientes al inicio y al final, vencidas, entraron/salieron, días de cola y OTST con más de 8 semanas (inicio y fin) del periodo |
 | `indicadores.porTecnico` / `porCliente` | OTST distintas, intentos por OTST, % efectivas, grupos (clientes: los 50 con más OTST) |
 | `indicadores.porHora` | Registros y % efectivas por hora del día |
 

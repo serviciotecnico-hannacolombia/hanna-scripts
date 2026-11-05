@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Planificador de Llamadas de Seguimiento - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.4.0
+// @version      1.5.0
 // @description  En el Libro de Trabajo y en la Agenda rápida (/stecnico/agenda-llamadas): arma tu lista de llamadas del día con tu cupo (p. ej. 40 = máx. 10 de seguimiento [vencidas/reprogramadas] + el resto nuevas sin contacto) y filtro "Mis técnicos", muestra la carga de los próximos días hábiles (con festivos de Colombia), alertas, envejecimiento y avance. La Agenda abre al instante con la última lista guardada y actualiza el Libro de Trabajo en segundo plano. Opcional: se sincroniza con un Google Sheet (Apps Script) para guardar la bitácora y los indicadores, y para que varias personas llamen desde la misma cola sin repetir OTST. Solo lee la intranet: nunca cambia fechas ni envía formularios.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/libro_trabajo*
@@ -20,7 +20,7 @@
   'use strict';
 
   // Debe coincidir siempre con @version del header de arriba.
-  const VERSION = '1.4.0';
+  const VERSION = '1.5.0';
   const SYNC_CADA_MS = 20 * 1000;    // Sheet: cada cuánto se consulta la cola compartida (pestaña visible)
   const TOMADA_MIN = 20;             // una OTST "tomada" se libera sola a los 20 min si no se registra la llamada
   const URL_AGENDA = '/stecnico/agenda-llamadas';
@@ -172,6 +172,8 @@
     const inicioK = clave(inicio);
     const carga = {};      // día -> seguimientos planeados
     const agenda = {};     // día -> seguimientos agendados en la intranet (sin redistribuir)
+    // Lo que el equipo ya llamó hoy de seguimiento ocupa parte del cupo de hoy
+    if (inicioK === hoyK && cfg.segHechasHoy) carga[hoyK] = Math.min(cfg.cupoSegEquipo, cfg.segHechasHoy);
 
     const seg = filas.filter((f) => f.fecha).sort((a, b) => a.fecha.localeCompare(b.fecha) || b.dias - a.dias);
     for (const f of seg) {
@@ -201,6 +203,16 @@
     const ultimoSeg = seg.reduce((m, f) => (f.plan > m ? f.plan : m), inicioK);
     const ultimoNuevas = nuevas.reduce((m, f) => (f.plan > m ? f.plan : m), inicioK);
     return { hoyK, inicioK, seg, nuevas, carga, agenda, sugerida: clave(s), ultimoSeg, ultimoNuevas };
+  }
+
+  // Seguimientos (OTST con fecha en la primera foto del día) que ya cambiaron de fecha o
+  // salieron del estado hoy: llamadas de seguimiento ya hechas por el equipo
+  function segHechasHoy(filas, hoyK) {
+    const ini = leer(K.inicioDia, null);
+    if (!ini || ini.fecha !== hoyK || !ini.items) return 0;
+    const actual = {};
+    filas.forEach((f) => { actual[f.otst] = f.fecha; });
+    return Object.entries(ini.items).filter(([o, f]) => f !== null && (!(o in actual) || actual[o] !== f)).length;
   }
 
   // ─────────────────────────────────────────────
@@ -250,6 +262,7 @@
       agendadas: plan.seg.filter((f) => f.tipo === 'agendada').length,
       entradas: primeraVez ? null : entradas,
       hechasSeg, hechasNuevas, cerradas,
+      viejas: filas.filter((f) => f.dias >= cfg.alertaSemanas * 7).length, // más de N semanas en el estado
     };
     Object.keys(hist).sort().slice(0, -180).forEach((k) => delete hist[k]);
     guardar(K.hist, hist);
@@ -553,6 +566,10 @@
       #hpl .hpl-alertas li { font-size: 13px; padding: 6px 10px; border-radius: 6px; margin-bottom: 4px; background: #fff6e0; border-left: 4px solid #e0a800; }
       #hpl .hpl-alertas li.rojo { background: #fdecea; border-left-color: #c0392b; }
       #hpl .hpl-alertas li.ok { background: #e9f7ef; border-left-color: #2f855a; }
+      #hpl details.hpl-viejas { margin-top: 5px; }
+      #hpl details.hpl-viejas summary { cursor: pointer; color: #0b3d78; font-weight: 700; font-size: 12px; }
+      #hpl details.hpl-viejas table.hpl-lista { background: #fff; margin: 6px 0; }
+      #hpl .hpl-col .num small { font-weight: 400; color: #6b7a8c; margin-left: 1px; }
       #hpl .hpl-grid2 { display: grid; grid-template-columns: 3fr 2fr; gap: 14px; margin-bottom: 12px; }
       #hpl .hpl-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; }
       #hpl .hpl-card h4 { margin: 0 0 8px; font-size: 13px; color: #0b3d78; }
@@ -631,6 +648,8 @@
   let avisoTemporal = '';
   let ultimaColaDias = null;  // se envía en el resumen diario del Sheet
   let ultimaLista = [];       // tu lista de hoy (para el CSV)
+  let ultimasViejas = [];     // OTST con más de N semanas (para el CSV de cierre)
+  let viejasAbierto = false;  // el detalle de esas OTST sigue abierto entre redibujos
 
   function render() {
     if (!datos.ts) { pintarCargando(); return; }
@@ -645,6 +664,7 @@
       : cfg.cupoTotal - cfg.cupoSeg;
     cfg.capNuevas = capNuevasEquipo;
     const hoy = d0(new Date());
+    cfg.segHechasHoy = segHechasHoy(filas, clave(hoy));
     const plan = planificar(filas, hoy, cfg);
     const reg = registrar(filas, plan, cfg);
     ultimaColaDias = habilesEntre(plan.inicioK, plan.ultimoSeg) + 1;
@@ -780,7 +800,20 @@
     if (diasColaNuevas > 1) alertas.push(['', `${plan.nuevas.length} OTST sin contacto: con ${capNuevasEquipo} por día se alcanzan a llamar todas en ${diasColaNuevas} días hábiles.`]);
     if (sync && remoto.ok === false) alertas.unshift(['rojo', `No se pudo sincronizar con el Sheet: ${esc(remoto.error)}. La agenda sigue funcionando sola en este navegador.`]);
     const viejas = filas.filter((f) => f.dias >= cfg.alertaSemanas * 7).sort((a, b) => b.dias - a.dias);
-    if (viejas.length) alertas.push(['', `${viejas.length} OTST con más de ${cfg.alertaSemanas} semanas en este estado: ${viejas.slice(0, 6).map((f) => `<a href="/stecnico/item/${f.otst}" target="hpl_otst">${f.otst}</a> (${Math.floor(f.dias / 7)} sem)`).join(', ')}${viejas.length > 6 ? '…' : ''}. Considera cierre o disposición final.`]);
+    ultimasViejas = viejas;
+    if (viejas.length) {
+      // Llamadas registradas de cada una (bitácora de este navegador + las del equipo que trajo el Sheet)
+      const llamadasDe = {};
+      leer(K.log, []).forEach((e) => { if (e && e.otst) { const l = (llamadasDe[e.otst] = llamadasDe[e.otst] || { n: 0, ts: 0 }); l.n++; l.ts = Math.max(l.ts, new Date(e.ts).getTime() || 0); } });
+      ultimasViejas = viejas.map((f) => ({ ...f, llamadas: (llamadasDe[f.otst] || {}).n || 0, ultima: (llamadasDe[f.otst] || {}).ts || 0 }));
+      const tablaViejas = `<table class="hpl-lista"><tr><th>OTST</th><th>Cliente</th><th>Técnico</th><th>En el estado</th><th>Próximo contacto</th><th title="Las que conoce esta agenda: registradas en este navegador + las del equipo de hoy (Sheet). El historial completo está en la Bitácora del Sheet.">Llamadas en la agenda</th></tr>${ultimasViejas.map((f) => `<tr>
+        <td><a href="/stecnico/item/${f.otst}" target="hpl_otst">${f.otst}</a>${f.garantia ? ' <span class="tag gar">Garantía</span>' : ''}</td><td>${esc(f.cliente)}</td><td>${esc(f.tecnico)}</td>
+        <td><b>${Math.floor(f.dias / 7)} sem</b></td><td>${f.fecha ? `<span class="tag ${f.tipo}">${corta(f.fecha)}</span>` : '<span class="tag nueva">Sin contacto</span>'}</td>
+        <td>${f.llamadas ? `${f.llamadas} · última ${corta(clave(new Date(f.ultima)))}` : '–'}</td></tr>`).join('')}</table>`;
+      alertas.push(['', `${viejas.length} OTST con más de ${cfg.alertaSemanas} semanas en este estado: ${viejas.slice(0, 6).map((f) => `<a href="/stecnico/item/${f.otst}" target="hpl_otst">${f.otst}</a> (${Math.floor(f.dias / 7)} sem)`).join(', ')}${viejas.length > 6 ? '…' : ''}. Considera cierre o disposición final.
+        <details class="hpl-viejas"${viejasAbierto ? ' open' : ''}><summary>Ver ${viejas.length > 6 ? `las ${viejas.length}` : 'el detalle'} (cliente, técnico, llamadas)</summary>${tablaViejas}
+        <button type="button" class="mini" data-act="csv-cierre">⬇ CSV para cierre (${viejas.length})</button></details>`]);
+    }
     const multis = Object.entries(porCliente).filter(([, l]) => l.length > 1);
     if (multis.length) alertas.push(['ok', `${multis.length} clientes tienen varias OTST abiertas (${multis.reduce((a, [, l]) => a + l.length, 0)} en total): revisa si el contacto es el mismo para resolverlas en una sola llamada.`]);
     if (!alertas.length) alertas.push(['ok', 'Todo al día: ninguna vencida ni día sobrecargado.']);
@@ -795,12 +828,16 @@
       const propias = enDia.filter((f) => f.fecha === k).length;
       const movidas = enDia.length - propias;
       const intr = plan.agenda[k] || 0;
-      return `<div class="hpl-col" title="${corta(k)}: ${enDia.length} planeadas (${propias} agendadas para ese día, ${movidas} vencidas o corridas)${intr ? ` · ${intr} agendadas en la intranet` : ''}">
+      // Hoy: lo ya llamado (gris) + lo que falta
+      const ya = k === plan.hoyK ? Math.min(segEq, cfg.segHechasHoy || 0) : 0;
+      const tot = enDia.length + ya;
+      return `<div class="hpl-col" title="${corta(k)}: ${enDia.length} planeadas (${propias} agendadas para ese día, ${movidas} vencidas o corridas)${ya ? ` · ${cfg.segHechasHoy} ya llamadas hoy` : ''}${intr ? ` · ${intr} agendadas en la intranet` : ''}">
         ${intr > segEq ? `<span class="intr">${intr}⚠</span>` : ''}
-        <span class="num">${enDia.length || ''}</span>
-        <div class="pila" style="height:${alto(enDia.length)}">
-          <i style="height:${enDia.length ? (propias / enDia.length) * 100 : 0}%;background:#0b6fd6"></i>
-          <i style="height:${enDia.length ? (movidas / enDia.length) * 100 : 0}%;background:#e8913a"></i>
+        <span class="num">${ya ? `${enDia.length}<small>+${ya}✓</small>` : enDia.length || ''}</span>
+        <div class="pila" style="height:${alto(tot)}">
+          <i style="height:${tot ? (ya / tot) * 100 : 0}%;background:#a0aec0"></i>
+          <i style="height:${tot ? (propias / tot) * 100 : 0}%;background:#0b6fd6"></i>
+          <i style="height:${tot ? (movidas / tot) * 100 : 0}%;background:#e8913a"></i>
         </div>
       </div>`;
     }).join('');
@@ -816,7 +853,7 @@
     // Tendencia (historial de fotos diarias)
     const hk = Object.keys(reg.hist).sort().slice(-10);
     const tendencia = hk.length >= 2
-      ? `<table class="hpl-lista"><tr><th>Día</th><th>Pendientes</th><th>Vencidas</th><th>Sin contacto</th><th>Entraron</th><th>Llamadas</th></tr>${hk.map((k) => { const h = reg.hist[k]; return `<tr><td>${corta(k)}</td><td>${h.total}</td><td>${h.vencidas}</td><td>${h.sinContacto}</td><td>${h.entradas ?? '–'}</td><td>${h.hechasSeg + h.hechasNuevas}</td></tr>`; }).join('')}</table>`
+      ? `<table class="hpl-lista"><tr><th>Día</th><th>Pendientes</th><th>Vencidas</th><th>Sin contacto</th><th>Más de ${cfg.alertaSemanas} sem</th><th>Entraron</th><th>Llamadas</th></tr>${hk.map((k) => { const h = reg.hist[k]; return `<tr><td>${corta(k)}</td><td>${h.total}</td><td>${h.vencidas}</td><td>${h.sinContacto}</td><td>${h.viejas ?? '–'}</td><td>${h.entradas ?? '–'}</td><td>${h.hechasSeg + h.hechasNuevas}</td></tr>`; }).join('')}</table>`
       : '<div class="hpl-nota">La tendencia aparece desde el segundo día de uso (el script toma una foto de la lista cada vez que abres el Libro de Trabajo).</div>';
 
     // Tabla de tu lista: llamadas hechas (✅) primero y luego las pendientes; las demás
@@ -919,7 +956,7 @@
             <h4>Carga de seguimiento — próximos ${cfg.diasGrafico} días hábiles</h4>
             <div class="hpl-chart">${barras}<div class="hpl-linea" style="bottom:${alto(segEq)}"><span>cupo ${segEq}</span></div></div>
             <div class="hpl-dias">${etiquetasDias}</div>
-            <div class="hpl-leyenda"><span><b style="background:#0b6fd6"></b>Agendadas para ese día</span><span><b style="background:#e8913a"></b>Vencidas o corridas por falta de cupo</span><span style="color:#c0392b">N⚠ = agendadas en la intranet por encima del cupo</span></div>
+            <div class="hpl-leyenda"><span><b style="background:#a0aec0"></b>Ya llamadas hoy</span><span><b style="background:#0b6fd6"></b>Agendadas para ese día</span><span><b style="background:#e8913a"></b>Vencidas o corridas por falta de cupo</span><span style="color:#c0392b">N⚠ = agendadas en la intranet por encima del cupo</span></div>
           </div>
           <div class="hpl-card">
             <h4>Antigüedad en "Llamada Seguimiento Diagnóstico"</h4>
@@ -984,6 +1021,8 @@
       ancla.insertAdjacentElement(ancla.classList.contains('lt_indicadores') ? 'afterend' : 'beforebegin', panel);
     }
     panel.addEventListener('click', alClic);
+    // "toggle" no burbujea: se escucha en captura
+    panel.addEventListener('toggle', (e) => { if (e.target.classList && e.target.classList.contains('hpl-viejas')) viejasAbierto = e.target.open; }, true);
     return panel;
   }
 
@@ -1058,7 +1097,6 @@
     datos.filas.forEach((f) => { info[f.otst] = f; });
     const fecha = (k) => (k ? k.split('-').reverse().join('/') : '');
     const tipo = { vencida: 'Vencida', hoy: 'Agendada hoy', agendada: 'Agendada', nueva: 'Sin contacto' };
-    const q = (v) => (/[",;\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
     const filas = [['OTST', 'Cliente', 'Técnico Asignado', '¿En garantía?', 'Tipo', 'Fecha próximo contacto', 'Estado']];
     const prios = leer(K.prio, {});
     lista.items.forEach((it) => {
@@ -1069,10 +1107,27 @@
         : it.prio ? `Prioritaria pendiente${it.prio.nota ? ': ' + it.prio.nota : ''}` : 'Pendiente';
       filas.push([it.otst, f.cliente || '', f.tecnico || '', f.garantia ? 'SI' : 'NO', tipoTxt, fecha(it.fechaIni), estadoTxt]);
     });
+    descargarCSV(filas, `llamadas_${lista.fecha}.csv`);
+  }
+
+  // OTST con más de N semanas en el estado: para decidir cierre o disposición final
+  function exportarCierre() {
+    if (!ultimasViejas.length) return;
+    const fecha = (k) => (k ? k.split('-').reverse().join('/') : '');
+    const filas = [['OTST', 'Cliente', 'Técnico Asignado', '¿En garantía?', 'Semanas en el estado', 'Tiempo', 'Fecha próximo contacto', 'Llamadas en la agenda (este navegador)', 'Última llamada en la agenda', 'Link']];
+    ultimasViejas.forEach((f) => {
+      filas.push([f.otst, f.cliente || '', f.tecnico || '', f.garantia ? 'SI' : 'NO', Math.floor(f.dias / 7), f.tiempo || '', fecha(f.fecha) || 'Sin contacto',
+        f.llamadas || 0, f.ultima ? fecha(clave(new Date(f.ultima))) : '', `${location.origin}/stecnico/item/${f.otst}`]);
+    });
+    descargarCSV(filas, `otst_para_cierre_${clave(new Date())}.csv`);
+  }
+
+  function descargarCSV(filas, nombre) {
+    const q = (v) => (/[",;\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
     const csv = '﻿' + filas.map((r) => r.map((v) => q(String(v))).join(',')).join('\r\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    a.download = `llamadas_${lista.fecha}.csv`;
+    a.download = nombre;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1102,6 +1157,7 @@
     if (b.dataset.act === 'sync') { configurarSync(); return; }
     if (b.dataset.act === 'actualizar') { actualizarDesdeLibro(); return; }
     if (b.dataset.act === 'csv') { exportarCSV(); return; }
+    if (b.dataset.act === 'csv-cierre') { exportarCierre(); return; }
     if (b.dataset.act === 'cfg') {
       const cfg = { ...CFG_DEF, ...leer(K.cfg, {}) };
       const total = parseInt(prompt('TUS llamadas por día (cupo total de esta persona):', cfg.cupoTotal), 10);
