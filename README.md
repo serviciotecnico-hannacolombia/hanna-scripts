@@ -17,6 +17,8 @@ Instala solo los que uses — cada uno vive en su propia página de la intranet 
 | **Lineamientos del Cliente** | `.../stecnico/item/N` (solo "Ver Detalle") | Detecta el NIT del cliente y muestra sus lineamientos especiales (por categoría) debajo de la tarjeta de Estado, leídos desde Google Sheets. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/lineamientos-cliente.user.js) |
 | **Autocompletar Cotización SGV** | `.../sgv/ingresos/cotizaciones/crear` | Llena Fecha Primer Seguimiento (+2 días hábiles) y Fecha Cierre (+2 meses, ajustada a día hábil), agrega el comentario de la OTST relacionada si aplica, y completa "Información de Aplicación" con un texto por defecto. Solo llena campos vacíos. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/cotizacion-sgv.user.js) |
 | **Guardar Contacto en Google Contacts** | `.../stecnico/item/N` (solo detalle de la OT) | Resalta cada teléfono del contacto en la OT y revisa número por número si ya está guardado (gris "Buscando…" → verde con el primer nombre, o amarillo "No guardado"); al hacer clic ("Crear contacto") abre un cuadro de confirmación editable y, al aceptar, crea el contacto en Google Contacts con etiqueta "Client" y foto aleatoria, sin duplicar. Nombre, apellido y empresa siempre en MAYÚSCULAS. Requiere un Apps Script propio (ver sección abajo). | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/contactos-google.user.js) |
+| **Planificador de Llamadas** | `.../stecnico/libro_trabajo` y `.../stecnico/agenda-llamadas` | **Agenda rápida** (abre al instante y se actualiza sola en segundo plano) + panel sobre "Esperando Llamada Seguimiento Diagnóstico": lista del día con cupo (40 = máx. 10 de seguimiento + nuevas sin contacto), carga de los próximos días hábiles (con festivos de Colombia), alertas, antigüedad, tendencia y avance del día. Solo lee la página. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/planificador-llamadas.user.js) |
+| **Llamada de Seguimiento Diagnóstico** | `.../stecnico/item/*/diagnosiscall` | Deja "Contactar nuevamente" por defecto, calendario siempre abierto con festivos y la carga de cada día (verde/amarillo/rojo), sugiere el primer día con cupo, mensajes rápidos y confirmación antes de cerrar la comunicación. Nunca presiona Continuar. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/llamada-seguimiento.user.js) |
 
 ## Instalación (una sola vez, por persona, por cada script)
 
@@ -435,6 +437,31 @@ Si cambias el código del Apps Script: **Implementar → Administrar implementac
 1. Abre la URL `/exec` en el navegador: debe mostrar `"version":"1.6"` (o mayor). Si no muestra versión, el Apps Script está desactualizado: pega el `.gs` nuevo y publica una **versión nueva**.
 2. Pasa el mouse sobre el número amarillo: si dice *"no se pudo verificar…"*, ahí aparece el motivo. También queda en la consola (F12) como `[Contactos] Respuesta de la consulta`.
 3. La detección compara el correo y los últimos 10 dígitos del teléfono contra tu lista de contactos (no importan espacios, guiones ni +57). Un contacto recién creado en Google puede tardar unos minutos en verse.
+
+## Planificador de Llamadas + Llamada de Seguimiento
+
+Los dos scripts trabajan juntos (comparten el almacenamiento del navegador en la intranet; no se sube nada a ningún lado):
+
+1. **Planificador** (Libro de Trabajo): cada vez que lo abres toma una foto de *Esperando Llamada Seguimiento Diagnóstico* y arma el plan:
+   - **Seguimiento** (vencidas + agendadas): máx. **10 por día hábil**, lo más atrasado primero. Si un día ya tiene 10, el excedente se corre al siguiente día con cupo.
+   - **Nuevas** (sin fecha de próximo contacto): el resto del cupo diario (40 − seguimientos), de la más antigua a la más reciente.
+   - La **lista de hoy** se congela con la primera carga del día; cada OTST que cambia de fecha o sale del estado queda con ✅ y suma al avance.
+   - Las OTST de clientes con varias abiertas muestran el nombre del contacto (se consulta la OTST en segundo plano) para saber si una sola llamada sirve para todas.
+   - ⚙️ **Cupos** cambia el total diario y el máximo de seguimientos.
+2. **Llamada de Seguimiento** (`.../diagnosiscall`): pinta cada día del calendario según la carga planeada (verde con cupo, amarillo casi lleno, rojo lleno), tacha los festivos, propone la fecha **Sugerida** y avisa si eliges un día lleno. Al dar Continuar suma esa llamada a la carga del día elegido, para que la siguiente sugerencia ya la cuente.
+
+La tendencia y el promedio de OTST que entran por día se vuelven exactos con unos días de uso (antes se estiman con la columna *Tiempo*).
+
+### Agenda rápida: `https://intranet.hannacolombia.com/stecnico/agenda-llamadas`
+
+El Libro de Trabajo tarda ~6 s (arma llamadas, cotizaciones y pedidos a la vez). La Agenda evita esa espera — guárdala en favoritos y trabaja desde ahí:
+
+- **Abre al instante** con la última lista guardada y lee el Libro de Trabajo **en segundo plano**: al abrirla (si los datos tienen más de 5 min), al volver a la pestaña después de una llamada (mismo criterio), cada 10 min, o con **↻ Actualizar**. Arriba dice "Datos hace X min".
+- La lista de hoy va primero; los gráficos y alertas, debajo.
+- **📞 Llamar** y el número de OTST abren siempre la misma pestaña secundaria (no se acumulan pestañas).
+- Al dar **Continuar** en la llamada (con *Llamada de Seguimiento* instalado), la OTST queda ✅ en la agenda **al instante**, sin esperar la siguiente lectura del Libro.
+- **⬇ CSV de hoy** descarga la lista del día con las columnas `OTST, Cliente, Técnico Asignado, ¿En garantía?` (SI/NO) + `Tipo, Fecha próximo contacto, Estado`, lista para Excel.
+- Todo se guarda en el navegador (localStorage de la intranet); no se sube nada.
 
 ## Cuando hagas un cambio
 
