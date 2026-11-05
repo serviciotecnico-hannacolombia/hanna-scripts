@@ -25,7 +25,7 @@
  *     editar -> Versión nueva (la URL no cambia).
  */
 
-var VERSION = '1.0';
+var VERSION = '1.1';
 var ZONA = 'America/Bogota';
 var TOMADA_MIN = 20;   // una OTST "en llamada" se libera sola a los 20 min
 var ACTIVO_MIN = 30;   // personas conectadas en la última media hora
@@ -33,7 +33,8 @@ var ACTIVO_MIN = 30;   // personas conectadas en la última media hora
 var H_BITACORA = 'Bitácora';
 var H_RESUMEN = 'Resumen diario';
 var H_INDICADORES = 'Indicadores';
-var COLS_BITACORA = ['ID', 'Fecha y hora', 'Día', 'Usuario', 'OTST', 'Acción', 'Próximo contacto', 'Tipo', 'Cliente', 'Técnico', 'TS'];
+var COLS_BITACORA = ['ID', 'Fecha y hora', 'Día', 'Usuario', 'OTST', 'Acción', 'Próximo contacto', 'Tipo', 'Cliente', 'Técnico', 'TS',
+  'Grupo', 'Cuenta como llamada', 'OTST del grupo'];
 var COLS_RESUMEN = ['Día', 'Actualizado', 'Reportado por', 'Pendientes', 'Vencidas', 'Para hoy', 'Agendadas', 'Sin contacto',
   'Entraron', 'Llamadas seguimiento', 'Llamadas nuevas', 'Salieron del estado', 'Días de cola seguimiento'];
 
@@ -77,8 +78,12 @@ function sincronizar_(datos, usuario) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   // 1. Llamadas nuevas -> Bitácora (sin duplicar por ID)
+  // Llamada agrupada: varias OTST de un cliente con una sola llamada (columna Grupo = la
+  // OTST donde se deja el seguimiento). Solo la primera fila del grupo cuenta como llamada.
   var recibidos = [];
   var filasNuevas = [];
+  var gruposHoy = {};
+  estado.bitacora.forEach(function (b) { if (b.grupo) gruposHoy[b.usuario + '|' + b.grupo + '|' + hoy] = 1; });
   (datos.llamadas || []).forEach(function (l) {
     var id = limpiar_(l.id);
     var otst = limpiar_(l.otst);
@@ -88,10 +93,15 @@ function sincronizar_(datos, usuario) {
     if (estado.ids[id]) return;
     estado.ids[id] = 1;
     var accion = l.accion === 'efectiva' ? 'efectiva' : l.accion === 'reprogramada' ? 'reprogramada' : limpiar_(l.accion);
+    var grupo = limpiar_(l.grupo);
+    var otsts = Array.isArray(l.otsts) ? l.otsts.map(limpiar_).filter(String).slice(0, 50) : [];
+    var claveGrupo = usuario + '|' + grupo + '|' + dia_(ts);
+    var cuenta = grupo && gruposHoy[claveGrupo] ? 0 : 1;
+    if (grupo) gruposHoy[claveGrupo] = 1;
     filasNuevas.push([id, new Date(ts), dia_(ts), usuario, otst, accion, limpiar_(l.fecha), limpiar_(l.tipo),
-      limpiar_(l.cliente), limpiar_(l.tecnico), ts]);
+      limpiar_(l.cliente), limpiar_(l.tecnico), ts, grupo, cuenta, otsts.join(', ')]);
     if (dia_(ts) === hoy) {
-      estado.bitacora.push({ id: id, ts: ts, otst: otst, accion: accion, fecha: limpiar_(l.fecha), usuario: usuario, tipo: limpiar_(l.tipo) });
+      estado.bitacora.push({ id: id, ts: ts, otst: otst, accion: accion, fecha: limpiar_(l.fecha), usuario: usuario, tipo: limpiar_(l.tipo), grupo: grupo, otsts: otsts });
     }
     delete estado.tomadas[otst]; // ya se llamó: se libera
   });
@@ -100,12 +110,11 @@ function sincronizar_(datos, usuario) {
     hb.getRange(hb.getLastRow() + 1, 1, filasNuevas.length, COLS_BITACORA.length).setValues(filasNuevas);
   }
 
-  // 2. OTST que alguien abrió para llamar ("en llamada")
-  var tomar = limpiar_(datos.tomar);
-  if (tomar) {
-    var t = estado.tomadas[tomar];
-    if (!t || t.usuario === usuario || ahora - t.ts > TOMADA_MIN * 60000) estado.tomadas[tomar] = { usuario: usuario, ts: ahora };
-  }
+  // 2. OTST que alguien abrió para llamar ("en llamada"): una o todas las del cliente
+  (Array.isArray(datos.tomar) ? datos.tomar : [datos.tomar]).map(limpiar_).filter(String).slice(0, 50).forEach(function (o) {
+    var t = estado.tomadas[o];
+    if (!t || t.usuario === usuario || ahora - t.ts > TOMADA_MIN * 60000) estado.tomadas[o] = { usuario: usuario, ts: ahora };
+  });
   var soltar = limpiar_(datos.soltar);
   if (soltar && estado.tomadas[soltar] && estado.tomadas[soltar].usuario === usuario) delete estado.tomadas[soltar];
   Object.keys(estado.tomadas).forEach(function (o) {
@@ -151,7 +160,8 @@ function leerEstado_(hoy) {
       if (diaFila !== hoy) return;
       var ts = Number(r[10]) || (r[1] instanceof Date ? r[1].getTime() : 0);
       var fecha = r[6] instanceof Date ? Utilities.formatDate(r[6], ZONA, 'yyyy-MM-dd') : String(r[6] || '');
-      estado.bitacora.push({ id: id, ts: ts, otst: String(r[4]), accion: String(r[5]), fecha: fecha, usuario: String(r[3]), tipo: String(r[7]) });
+      var otstsG = String(r[13] || '').split(/\s*,\s*/).filter(String);
+      estado.bitacora.push({ id: id, ts: ts, otst: String(r[4]), accion: String(r[5]), fecha: fecha, usuario: String(r[3]), tipo: String(r[7]), grupo: String(r[11] || ''), otsts: otstsG });
     });
   }
   return estado;
@@ -200,6 +210,11 @@ function configurar() {
   hb.getRange('G:G').setNumberFormat('@');
   hb.hideColumns(1);
   hb.hideColumns(11);
+  // Filas de antes de la versión 1.1 (sin "Cuenta como llamada"): cada una era una llamada
+  if (hb.getLastRow() > 1) {
+    var rango = hb.getRange(2, 13, hb.getLastRow() - 1, 1);
+    rango.setValues(rango.getValues().map(function (v) { return [v[0] === '' ? 1 : v[0]]; }));
+  }
 
   var hr = hoja_(ss, H_RESUMEN, COLS_RESUMEN);
   hr.getRange('A:A').setNumberFormat('@');
@@ -208,13 +223,15 @@ function configurar() {
   var hi = ss.getSheetByName(H_INDICADORES) || ss.insertSheet(H_INDICADORES);
   hi.clear();
   hi.getCharts().forEach(function (c) { hi.removeChart(c); });
-  var B = "'" + H_BITACORA + "'!A:K";
+  var B = "'" + H_BITACORA + "'!A:N";
   var bloques = [
-    ['A1', 'Llamadas por día y persona',
+    ['A1', 'Llamadas por día y persona (un cliente con varias OTST = 1 llamada)',
+      '=IFERROR(QUERY(' + B + ',"select C, sum(M) where C is not null group by C pivot D order by C desc label C \'Día\'",1),"Sin datos aún")'],
+    ['K1', 'OTST registradas por día y persona',
       '=IFERROR(QUERY(' + B + ',"select C, count(E) where C is not null group by C pivot D order by C desc label C \'Día\'",1),"Sin datos aún")'],
     ['A30', 'Resultado por persona (todas las fechas)',
       '=IFERROR(QUERY(' + B + ',"select D, count(E) where D is not null group by D pivot F label D \'Usuario\'",1),"Sin datos aún")'],
-    ['F30', 'Llamadas por tipo y día',
+    ['F30', 'OTST por tipo y día',
       '=IFERROR(QUERY(' + B + ',"select C, count(E) where C is not null group by C pivot H order by C desc label C \'Día\'",1),"Sin datos aún")'],
     ['A60', 'Resultado por técnico asignado',
       '=IFERROR(QUERY(' + B + ',"select J, count(E) where J is not null group by J pivot F label J \'Técnico\'",1),"Sin datos aún")'],
@@ -252,7 +269,8 @@ function configurar() {
 function hoja_(ss, nombre, columnas) {
   var h = ss.getSheetByName(nombre);
   if (!h) h = ss.insertSheet(nombre);
-  if (h.getLastRow() === 0) {
+  // Hoja nueva, o creada con una versión anterior que tenía menos columnas
+  if (h.getLastRow() === 0 || h.getLastColumn() < columnas.length) {
     h.getRange(1, 1, 1, columnas.length).setValues([columnas]).setFontWeight('bold').setBackground('#e6f0fb');
     h.setFrozenRows(1);
   }

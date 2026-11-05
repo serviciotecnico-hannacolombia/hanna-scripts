@@ -446,11 +446,24 @@ Los dos scripts trabajan juntos (comparten el almacenamiento del navegador en la
 1. **Planificador** (Libro de Trabajo): cada vez que lo abres toma una foto de *Esperando Llamada Seguimiento Diagnóstico* y arma el plan:
    - **Seguimiento** (vencidas + agendadas): máx. **10 por día hábil**, lo más atrasado primero. Si un día ya tiene 10, el excedente se corre al siguiente día con cupo.
    - **Nuevas** (sin fecha de próximo contacto): el resto del cupo diario (40 − seguimientos), de la más antigua a la más reciente.
-   - **Tu lista de hoy** toma las siguientes OTST libres de la cola hasta completar tu cupo (lo que ya llamaste queda con ✅ arriba). Cada OTST que cambia de fecha o sale del estado suma al avance.
-   - Las OTST de clientes con varias abiertas muestran el nombre del contacto (se consulta la OTST en segundo plano) para saber si una sola llamada sirve para todas.
+   - **Tu lista de hoy** toma los siguientes clientes libres de la cola hasta completar tu cupo (lo que ya llamaste queda con ✅ arriba). Cada OTST que cambia de fecha o sale del estado suma al avance.
+   - **Un cliente con varias OTST = una llamada**: sus demás OTST van debajo (↳) sin gastar cupo, con el nombre del contacto de cada una (para ver si es la misma persona). ⭐ marca la mayor, donde se deja el seguimiento.
    - ⚙️ **Cupos**: tus llamadas por día, cuántas de ellas son de seguimiento, y el máximo de reprogramaciones por día de todo el equipo (lo que se agenda en la intranet, por defecto 10).
    - **Mis técnicos**: chips con los técnicos de la columna *Técnico*. Marca los tuyos y tu lista solo toma sus OTST ("yo llamo los de Germán, tú los de Wilfor"). *Todos* quita el filtro.
 2. **Llamada de Seguimiento** (`.../diagnosiscall`): pinta cada día del calendario según la carga planeada (verde con cupo, amarillo casi lleno, rojo lleno), tacha los festivos, propone la fecha **Sugerida** y avisa si eliges un día lleno. Al dar Continuar suma esa llamada a la carga del día elegido, para que la siguiente sugerencia ya la cuente.
+
+### Llamada agrupada por cliente
+
+Cuando un cliente tiene varias OTST se hace **una sola llamada**: todas llevan el mismo texto, se cierran con *contacto efectivo* y solo la mayor queda abierta (reprogramada). Así, la próxima vez sale una sola llamada.
+
+1. En la agenda, **📞 Llamar** en el cliente (todas sus OTST quedan 🔒 para los demás).
+2. En la llamada aparece el recuadro **🔗 Llamada agrupada** con las OTST del cliente: desmarca las que no correspondan (p. ej. otro contacto) y dale **Insertar encabezado**. Pone como primera línea de la Observación:
+   `Orden relacionada con la OTST x1, x2, …, xn. Se deja seguimiento en xn` (xn = la mayor)
+   y elige la acción: *contacto efectivo* si la OTST se cierra, *Contactar nuevamente* si es xn.
+3. Escribe debajo lo que se habló y dale **Continuar**.
+4. Vuelve a la agenda y abre las demás con **📝 Registrar** (o **📝 Falta registrar**): el texto, el nombre del contacto, la acción y (en xn) la fecha **se rellenan solos**. Solo revisas y das Continuar.
+
+Si escribes el encabezado a mano con ese formato también se reconoce. El grupo se recuerda solo durante el día. En la agenda y en el Sheet el grupo cuenta como **1 llamada**; la Bitácora conserva una fila por OTST.
 
 La tendencia y el promedio de OTST que entran por día se vuelven exactos con unos días de uso (antes se estiman con la columna *Tiempo*).
 
@@ -474,9 +487,9 @@ Con el Apps Script `agenda-llamadas.gs` la agenda guarda cada llamada en un Goog
 - Arriba: **🟢 En línea con …** (quién está conectado) o **🔴 Sin Sheet** si falla (la agenda sigue funcionando sola).
 - El cupo es **por persona** (⚙️ Cupos en cada navegador); la proyección de nuevas suma el cupo de todas las personas conectadas.
 - En el Sheet:
-  - **Bitácora**: una fila por llamada (fecha y hora, persona, OTST, Efectiva/Reprogramada, próximo contacto, tipo, cliente, técnico).
+  - **Bitácora**: una fila por OTST registrada (fecha y hora, persona, OTST, Efectiva/Reprogramada, próximo contacto, tipo, cliente, técnico, grupo, *Cuenta como llamada* 1/0, OTST del grupo).
   - **Resumen diario**: el estado de la cola cada día (pendientes, vencidas, sin contacto, entraron, llamadas, días de cola) + gráfico.
-  - **Indicadores**: llamadas por día y persona, resultado por persona y por técnico, llamadas por tipo, OTST con más intentos.
+  - **Indicadores**: llamadas por día y persona (un grupo = 1), OTST registradas por día y persona, resultado por persona y por técnico, OTST por tipo, OTST con más intentos.
 
 **Preparación (una sola vez, la hace una persona):**
 
@@ -484,11 +497,11 @@ Con el Apps Script `agenda-llamadas.gs` la agenda guarda cada llamada en un Goog
 2. En el Sheet: **Extensiones → Apps Script**. Borra lo que haya y pega el contenido de `agenda-llamadas.gs`.
 3. **Configuración del proyecto (⚙) → Propiedades del script → Agregar**: `CLAVE` = una clave secreta larga que te inventes.
 4. Arriba elige la función **configurar** y dale **▶ Ejecutar** (acepta los permisos). Crea las hojas Bitácora, Resumen diario e Indicadores.
-5. **Implementar → Nueva implementación → Aplicación web**: *Ejecutar como*: Yo · *Quién tiene acceso*: Cualquier usuario. Copia la URL que termina en `/exec` (abierta en el navegador debe mostrar `"version":"1.0"`).
+5. **Implementar → Nueva implementación → Aplicación web**: *Ejecutar como*: Yo · *Quién tiene acceso*: Cualquier usuario. Copia la URL que termina en `/exec` (abierta en el navegador debe mostrar `"version":"1.1"`).
 
 **Cada persona:** en la Agenda de llamadas → **☁ Sheets** → pega la URL, la CLAVE y escribe su nombre (así la ven los demás). Para desconectarte deja la URL vacía. Tampermonkey pedirá permiso para conectarse a `script.google.com` la primera vez: elige *Permitir siempre*.
 
-Si cambias el Apps Script: **Implementar → Administrar implementaciones → editar → Versión nueva** (la URL no cambia).
+Si cambias el Apps Script: pega el código nuevo, vuelve a ejecutar **configurar** (rehace la hoja Indicadores; no borra la Bitácora) y luego **Implementar → Administrar implementaciones → editar (lápiz) → Versión: Nueva versión → Implementar** (la URL no cambia).
 
 ## Cuando hagas un cambio
 

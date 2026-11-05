@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Planificador de Llamadas de Seguimiento - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.2.0
+// @version      1.3.0
 // @description  En el Libro de Trabajo y en la Agenda rápida (/stecnico/agenda-llamadas): arma tu lista de llamadas del día con tu cupo (p. ej. 40 = máx. 10 de seguimiento [vencidas/reprogramadas] + el resto nuevas sin contacto) y filtro "Mis técnicos", muestra la carga de los próximos días hábiles (con festivos de Colombia), alertas, envejecimiento y avance. La Agenda abre al instante con la última lista guardada y actualiza el Libro de Trabajo en segundo plano. Opcional: se sincroniza con un Google Sheet (Apps Script) para guardar la bitácora y los indicadores, y para que varias personas llamen desde la misma cola sin repetir OTST. Solo lee la intranet: nunca cambia fechas ni envía formularios.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/libro_trabajo*
@@ -20,7 +20,7 @@
   'use strict';
 
   // Debe coincidir siempre con @version del header de arriba.
-  const VERSION = '1.2.0';
+  const VERSION = '1.3.0';
   const SYNC_CADA_MS = 20 * 1000;    // Sheet: cada cuánto se consulta la cola compartida (pestaña visible)
   const TOMADA_MIN = 20;             // una OTST "tomada" se libera sola a los 20 min si no se registra la llamada
   const URL_AGENDA = '/stecnico/agenda-llamadas';
@@ -357,8 +357,10 @@
     datos.filas.forEach((f) => { info[f.otst] = f; });
     // Mis llamadas (las que escribió el script de llamada en ESTE navegador) aún no confirmadas
     const mias = log.filter((e) => e && e.otst && !e.usuario && !enviados.has(idDe(e))).slice(-100).map((e) => ({
-      id: idDe(e), ts: e.ts, otst: e.otst, accion: e.accion, fecha: e.fecha || '',
+      // llamada-seguimiento guarda la hora en ISO: se envía en milisegundos
+      id: idDe(e), ts: new Date(e.ts).getTime() || Date.now(), otst: e.otst, accion: e.accion, fecha: e.fecha || '',
       tipo: e.tipo || tipoInicial(e.otst), cliente: (info[e.otst] || {}).cliente || '', tecnico: (info[e.otst] || {}).tecnico || '',
+      grupo: e.grupo || '', otsts: Array.isArray(e.otsts) ? e.otsts : [],
     }));
     const hoyK = clave(new Date());
     const resumen = leer(K.hist, {})[hoyK];
@@ -489,6 +491,10 @@
       #hpl .tag { display: inline-block; border-radius: 10px; padding: 1px 7px; font-size: 11px; font-weight: 700; white-space: nowrap; }
       #hpl .tag.vencida { background: #fdecea; color: #c0392b; } #hpl .tag.hoy { background: #fff1c2; color: #8a6100; }
       #hpl .tag.agendada { background: #e6f0fb; color: #0b3d78; } #hpl .tag.nueva { background: #e9f7ef; color: #2f855a; }
+      #hpl .tag.seg { background: #f1e9ff; color: #4a2a85; }
+      #hpl table.hpl-lista tr.sub td { border-bottom-color: #f6f2fb; }
+      #hpl table.hpl-lista tr.sub td.ok { color: #8a97a8; text-align: right; }
+      #hpl .mismo { color: #8a97a8; font-size: 11.5px; }
       #hpl .tag.multi { background: #efe7fb; color: #5b2c99; font-weight: 400; }
       #hpl .tag.gar { background: #fff1c2; color: #8a6100; font-weight: 400; }
       #hpl .contacto { color: #6b7a8c; font-size: 11.5px; }
@@ -546,38 +552,93 @@
     // Sin Sheet todo lo hecho cuenta como tuyo; con Sheet, lo que no tiene registro no es de nadie
     const esMia = (e) => (e.sinRegistro ? !sync : !e.usuario || e.usuario === yo);
     const tipoIni = (o) => { const f = reg.ini.items[o]; return f == null ? 'nueva' : f < hoyK ? 'vencida' : f === hoyK ? 'hoy' : 'agendada'; };
+    // Llamada agrupada (varias OTST de un cliente con el encabezado "Orden relacionada
+    // con la OTST…", ver llamada-seguimiento.user.js): cuenta como UNA llamada
+    const llamadaDe = (e) => (e.grupo ? `g${e.grupo}` : String(e.otst));
+    const grupoDe = {}; // otst -> registro del grupo de hoy al que pertenece
+    Object.values(ultimaDe).forEach((e) => { if (e.grupo && Array.isArray(e.otsts)) e.otsts.forEach((o) => { if (!grupoDe[o]) grupoDe[o] = e; }); });
     const misHechas = Object.values(ultimaDe).filter(esMia);
-    const misSeg = misHechas.filter((e) => tipoIni(e.otst) !== 'nueva');
-    const misNue = misHechas.filter((e) => tipoIni(e.otst) === 'nueva');
+    const llamadas = {}; // clave de llamada -> { seg, entradas }
+    misHechas.forEach((e) => {
+      const l = (llamadas[llamadaDe(e)] = llamadas[llamadaDe(e)] || { seg: false, entradas: [] });
+      l.entradas.push(e);
+      if (tipoIni(e.otst) !== 'nueva') l.seg = true;
+    });
+    const llamadasSeg = Object.values(llamadas).filter((l) => l.seg);
+    const llamadasNue = Object.values(llamadas).filter((l) => !l.seg);
     const porPersona = {};
-    Object.values(ultimaDe).forEach((e) => { const n = e.sinRegistro ? 'sin registro' : e.usuario || yo || 'Tú'; porPersona[n] = (porPersona[n] || 0) + 1; });
+    const contadas = new Set();
+    Object.values(ultimaDe).forEach((e) => {
+      const n = e.sinRegistro ? 'sin registro' : e.usuario || yo || 'Tú';
+      if (contadas.has(n + '|' + llamadaDe(e))) return;
+      contadas.add(n + '|' + llamadaDe(e));
+      porPersona[n] = (porPersona[n] || 0) + 1;
+    });
 
-    // ── Tu lista: siguientes OTST libres de la cola compartida hasta completar tu cupo ──
-    const filtroTec = cfg.misTecnicos;
-    const deMisTec = (f) => !filtroTec.length || filtroTec.includes(f.tecnico);
-    const libre = (f) => !ultimaDe[f.otst] && !tomadaPorOtro(f.otst) && deMisTec(f);
-    const pendientesSeg = plan.seg.filter((f) => f.tipo !== 'agendada'); // vencidas + hoy, lo más atrasado primero
-    const pendSeg = pendientesSeg.filter(libre).slice(0, Math.max(0, cfg.cupoSeg - misSeg.length));
-    const cupoNuevasMias = cfg.cupoTotal - Math.min(cfg.cupoSeg, misSeg.length + pendSeg.length);
-    const pendNue = plan.nuevas.filter(libre).slice(0, Math.max(0, cupoNuevasMias - misNue.length));
-    const enLlamadaOtros = [...pendientesSeg, ...plan.nuevas].filter((f) => !ultimaDe[f.otst] && deMisTec(f) && tomadaPorOtro(f.otst));
-    const itemHecho = (e) => ({ otst: e.otst, tipo: tipoIni(e.otst), fechaIni: reg.ini.items[e.otst] || null, hecha: e });
-    const itemPend = (f) => ({ otst: f.otst, tipo: f.tipo, fechaIni: f.fecha });
-    const listaSeg = [...misSeg.map(itemHecho), ...pendSeg.map(itemPend)];
-    const listaNue = [...misNue.map(itemHecho), ...pendNue.map(itemPend)];
-    ultimaLista = [...listaSeg, ...listaNue];
-    const cupoNuevasTxt = Math.max(0, cupoNuevasMias);
-
-    // Clientes con varias OTST abiertas (posible cierre de varias con una llamada)
+    // Clientes con varias OTST abiertas (se atienden todas en la misma llamada)
     const porCliente = {};
     filas.forEach((f) => { (porCliente[f.cliente] = porCliente[f.cliente] || []).push(f.otst); });
+    const porOtst = {};
+    filas.forEach((f) => { porOtst[f.otst] = f; });
+
+    // ── Tu lista: siguientes clientes libres de la cola compartida hasta completar tu cupo ──
+    // (un cliente = una llamada: sus demás OTST van debajo y no gastan cupo)
+    const filtroTec = cfg.misTecnicos;
+    const deMisTec = (f) => !filtroTec.length || filtroTec.includes(f.tecnico);
+    const clienteTomado = {};
+    filas.forEach((f) => { const t = tomadaPorOtro(f.otst); if (t && !clienteTomado[f.cliente]) clienteTomado[f.cliente] = t; });
+    const libre = (f) => !ultimaDe[f.otst] && !grupoDe[f.otst] && !clienteTomado[f.cliente] && deMisTec(f);
+    const usados = new Set();
+    const elegir = (cands, n) => {
+      const r = [];
+      for (const f of cands) {
+        if (r.length >= n) break;
+        if (!libre(f) || usados.has(f.cliente)) continue;
+        usados.add(f.cliente);
+        r.push(f);
+      }
+      return r;
+    };
+    const pendientesSeg = plan.seg.filter((f) => f.tipo !== 'agendada'); // vencidas + hoy, lo más atrasado primero
+    const pendSeg = elegir(pendientesSeg, Math.max(0, cfg.cupoSeg - llamadasSeg.length));
+    const cupoNuevasMias = cfg.cupoTotal - Math.min(cfg.cupoSeg, llamadasSeg.length + pendSeg.length);
+    const pendNue = elegir(plan.nuevas, Math.max(0, cupoNuevasMias - llamadasNue.length));
+    const vistosOtros = new Set();
+    const enLlamadaOtros = [...pendientesSeg, ...plan.nuevas].filter((f) => {
+      if (ultimaDe[f.otst] || !deMisTec(f) || !clienteTomado[f.cliente] || vistosOtros.has(f.cliente)) return false;
+      vistosOtros.add(f.cliente);
+      return true;
+    });
+
+    // Filas de la lista: la llamada principal y, debajo (↳), las demás OTST del cliente
+    const mayor = (l) => l.map(String).sort((a, b) => +b - +a)[0];
+    const itemSub = (o, seg, falta) => ({ otst: String(o), tipo: porOtst[o] ? porOtst[o].tipo : tipoIni(o), fechaIni: porOtst[o] ? porOtst[o].fecha : reg.ini.items[o] || null, sub: true, seg: String(o) === seg, falta });
+    const itemsHechos = (l) => {
+      const g = l.entradas.find((e) => e.grupo && Array.isArray(e.otsts));
+      const seg = g ? String(g.grupo) : null;
+      const hechos = l.entradas.slice().sort((a, b) => +a.otst - +b.otst)
+        .map((e, i) => ({ otst: String(e.otst), tipo: tipoIni(e.otst), fechaIni: reg.ini.items[e.otst] || null, hecha: e, sub: i > 0, seg: String(e.otst) === seg }));
+      // OTST del grupo que aún faltan por registrar en la intranet
+      const faltan = g ? g.otsts.map(String).filter((o) => !ultimaDe[o] && o in reg.actual).map((o) => itemSub(o, seg, true)) : [];
+      return [...hechos, ...faltan];
+    };
+    const itemsPend = (f) => {
+      const otras = (porCliente[f.cliente] || []).filter((o) => o !== f.otst && !ultimaDe[o] && !grupoDe[o]);
+      const seg = otras.length ? mayor([f.otst, ...otras]) : null;
+      const todas = otras.length ? [f.otst, ...otras] : null;
+      return [{ otst: f.otst, tipo: f.tipo, fechaIni: f.fecha, seg: f.otst === seg, todas }, ...otras.map((o) => ({ ...itemSub(o, seg, false), todas }))];
+    };
+    const listaSeg = [...llamadasSeg.flatMap(itemsHechos), ...pendSeg.flatMap(itemsPend)];
+    const listaNue = [...llamadasNue.flatMap(itemsHechos), ...pendNue.flatMap(itemsPend)];
+    ultimaLista = [...listaSeg, ...listaNue];
+    const cupoNuevasTxt = Math.max(0, cupoNuevasMias);
 
     const nVenc = plan.seg.filter((f) => f.tipo === 'vencida').length;
     const nHoy = plan.seg.filter((f) => f.tipo === 'hoy').length;
     const nAg = plan.seg.filter((f) => f.tipo === 'agendada').length;
     const diasColaSeg = habilesEntre(plan.inicioK, plan.ultimoSeg) + 1;
     const diasColaNuevas = habilesEntre(plan.inicioK, plan.ultimoNuevas) + 1;
-    const hechas = misHechas.length;
+    const hechas = Object.keys(llamadas).length; // llamadas, no OTST (un grupo = 1)
     const ent = entradasPromedio(reg.hist, filas);
     const segEq = cfg.cupoSegEquipo;
 
@@ -629,43 +690,41 @@
       ? `<table class="hpl-lista"><tr><th>Día</th><th>Pendientes</th><th>Vencidas</th><th>Sin contacto</th><th>Entraron</th><th>Llamadas</th></tr>${hk.map((k) => { const h = reg.hist[k]; return `<tr><td>${corta(k)}</td><td>${h.total}</td><td>${h.vencidas}</td><td>${h.sinContacto}</td><td>${h.entradas ?? '–'}</td><td>${h.hechasSeg + h.hechasNuevas}</td></tr>`; }).join('')}</table>`
       : '<div class="hpl-nota">La tendencia aparece desde el segundo día de uso (el script toma una foto de la lista cada vez que abres el Libro de Trabajo).</div>';
 
-    // Tabla de tu lista: hechas (✅) primero, luego pendientes agrupadas por cliente
-    const items = pestana === 'seg' ? listaSeg : listaNue;
-    const hechos = items.filter((it) => it.hecha);
-    const pend = items.filter((it) => !it.hecha);
-    const cliDe = (it) => (infoBase[it.otst] ? infoBase[it.otst].cliente : `#${it.otst}`);
-    const primero = {};
-    pend.forEach((it, i) => { if (!(cliDe(it) in primero)) primero[cliDe(it)] = i; });
-    const orden = [...hechos, ...pend.map((it, i) => ({ it, i })).sort((a, b) => primero[cliDe(a.it)] - primero[cliDe(b.it)] || a.i - b.i).map((x) => x.it)];
+    // Tabla de tu lista: llamadas hechas (✅) primero y luego las pendientes; las demás
+    // OTST del mismo cliente van debajo (↳) y se registran con el mismo texto
+    const orden = pestana === 'seg' ? listaSeg : listaNue;
     const multiOtsts = new Set(multis.flatMap(([, l]) => l));
     const etiquetaTipo = (tipo, fechaIni) => (tipo === 'vencida' ? `Vencida ${fechaIni ? corta(fechaIni) : ''}` : tipo === 'hoy' ? 'Hoy' : tipo === 'agendada' ? `Agendada ${fechaIni ? corta(fechaIni) : ''}` : 'Sin contacto');
     const resultado = (e) => (e.accion === 'efectiva' ? 'Contacto efectivo' : e.accion === 'reprogramada' ? `Reprogramada${e.fecha ? ' → ' + corta(e.fecha) : ''}` : 'Salió del estado');
-    let cliAnterior = null;
     let n = 0;
+    let filaN = 0;
     const filaHtml = (it, extraClase, accionHtml) => {
       const f = infoBase[it.otst];
       const cli = f ? f.cliente : (it.hecha && it.hecha.cliente) || '';
-      const otras = f ? (porCliente[f.cliente] || []).filter((o) => o !== it.otst) : [];
       const c = contactos[it.otst];
-      const nuevoGrupo = cli !== cliAnterior && cliAnterior !== null; cliAnterior = cli;
-      return `<tr class="${extraClase} ${nuevoGrupo && otras.length && !it.hecha ? 'grupo' : ''}">
-        <td class="ok">${it.hecha ? '✅' : extraClase === 'tomada' ? '🔒' : ++n}</td>
+      const marca = it.hecha ? '✅' : it.sub ? '↳' : extraClase === 'tomada' ? '🔒' : ++n;
+      return `<tr class="${extraClase}${it.sub ? ' sub' : ''}${!it.sub && filaN++ > 0 ? ' grupo' : ''}">
+        <td class="ok">${marca}</td>
         <td><a href="/stecnico/item/${it.otst}" target="hpl_otst">${it.otst}</a></td>
-        <td><span class="tag ${it.tipo}">${esc(etiquetaTipo(it.tipo, it.fechaIni))}</span>${f && f.garantia ? ' <span class="tag gar">Garantía</span>' : ''}</td>
-        <td>${esc(cli)}${otras.length && !it.hecha ? ` <span class="tag multi" title="Otras OTST abiertas de este cliente: ${otras.join(', ')}">+${otras.length} OTST: ${otras.join(', ')}</span>` : ''}
+        <td><span class="tag ${it.tipo}">${esc(etiquetaTipo(it.tipo, it.fechaIni))}</span>${f && f.garantia ? ' <span class="tag gar">Garantía</span>' : ''}${it.seg ? ' <span class="tag seg" title="La OTST de mayor número: aquí se deja el seguimiento; las demás se cierran">⭐ seguimiento</span>' : ''}</td>
+        <td>${it.sub ? '<span class="mismo">mismo cliente</span>' : esc(cli)}${it.todas && !it.sub ? ` <span class="tag multi">${it.todas.length} OTST · 1 llamada</span>` : ''}
           ${multiOtsts.has(it.otst) && !it.hecha ? `<div class="contacto">${c ? (c.n ? '👤 ' + esc(c.n) : '👤 sin nombre') : '👤 consultando…'}</div>` : ''}</td>
         <td>${f ? esc(f.tiempo) : ''}</td>
         <td>${f ? esc(f.tecnico) : esc((it.hecha && it.hecha.tecnico) || '')}</td>
         <td>${accionHtml}</td>
       </tr>`;
     };
-    const llamarHtml = (otst, texto) => `<a class="llamar" data-otst="${otst}" href="/stecnico/item/${otst}/diagnosiscall" target="hpl_otst">${texto}</a>`;
-    let filasLista = orden.map((it) => filaHtml(it, it.hecha ? 'hecha' : '', it.hecha ? esc(resultado(it.hecha)) : llamarHtml(it.otst, '📞 Llamar'))).join('');
+    // data-otsts: todas las OTST del cliente quedan "en llamada" para las demás personas
+    const llamarHtml = (otst, texto, todas) => `<a class="llamar" data-otst="${otst}" data-otsts="${(todas || [otst]).join(',')}" href="/stecnico/item/${otst}/diagnosiscall" target="hpl_otst">${texto}</a>`;
+    const accionDe = (it) => (it.hecha ? esc(resultado(it.hecha))
+      : it.falta ? llamarHtml(it.otst, '📝 Falta registrar')
+      : it.sub ? llamarHtml(it.otst, '📝 Registrar', it.todas)
+      : llamarHtml(it.otst, '📞 Llamar', it.todas));
+    let filasLista = orden.map((it) => filaHtml(it, it.hecha ? 'hecha' : '', accionDe(it))).join('');
     const otrosTab = enLlamadaOtros.filter((f) => (pestana === 'seg' ? f.tipo !== 'nueva' : f.tipo === 'nueva'));
     if (otrosTab.length) {
-      cliAnterior = null;
       filasLista += `<tr class="sep"><td colspan="7">En llamada por otras personas ahora</td></tr>` + otrosTab.map((f) => {
-        const t = tomadaPorOtro(f.otst);
+        const t = clienteTomado[f.cliente];
         return filaHtml({ otst: f.otst, tipo: f.tipo, fechaIni: f.fecha }, 'tomada',
           `<span class="quien">${esc(t.usuario)} · ${haceTexto(t.ts)}</span> ${llamarHtml(f.otst, 'Llamar igual')}`);
       }).join('');
@@ -689,7 +748,7 @@
       </div>
       <div class="hpl-body">
         <div class="hpl-kpis">
-          <div class="hpl-kpi ${hechas >= cfg.cupoTotal ? 'verde' : ''}"><div class="v">${hechas}/${cfg.cupoTotal}</div><div class="l">${sync ? 'Mis llamadas' : 'Llamadas'} hoy (${misSeg.length} seguimiento · ${misNue.length} nuevas)</div>${equipoTxt}<div class="hpl-barra"><i style="width:${Math.min(100, (hechas / cfg.cupoTotal) * 100)}%"></i></div></div>
+          <div class="hpl-kpi ${hechas >= cfg.cupoTotal ? 'verde' : ''}"><div class="v">${hechas}/${cfg.cupoTotal}</div><div class="l">${sync ? 'Mis llamadas' : 'Llamadas'} hoy (${llamadasSeg.length} seguimiento · ${llamadasNue.length} nuevas)</div>${equipoTxt}<div class="hpl-barra"><i style="width:${Math.min(100, (hechas / cfg.cupoTotal) * 100)}%"></i></div></div>
           <div class="hpl-kpi ${nVenc ? 'rojo' : 'verde'}"><div class="v">${nVenc}</div><div class="l">Vencidas</div></div>
           <div class="hpl-kpi ${nHoy > segEq ? 'ambar' : ''}"><div class="v">${nHoy}</div><div class="l">Agendadas para hoy</div></div>
           <div class="hpl-kpi"><div class="v">${plan.nuevas.length}</div><div class="l">Sin contacto (nuevas)</div></div>
@@ -713,15 +772,15 @@
         <div class="hpl-card" style="margin-bottom:12px"><h4>Tendencia</h4>${tendencia}</div>
         <div class="hpl-card hpl-lista-card">
           <div class="hpl-tabs">
-            <button type="button" data-tab="seg" class="${pestana === 'seg' ? 'act' : ''}">Seguimiento de hoy (${misSeg.length} hechas · cupo ${cfg.cupoSeg})</button>
-            <button type="button" data-tab="nue" class="${pestana === 'nue' ? 'act' : ''}">Nuevas de hoy (${misNue.length} hechas · cupo ${cupoNuevasTxt})</button>
+            <button type="button" data-tab="seg" class="${pestana === 'seg' ? 'act' : ''}">Seguimiento de hoy (${llamadasSeg.length} hechas · cupo ${cfg.cupoSeg})</button>
+            <button type="button" data-tab="nue" class="${pestana === 'nue' ? 'act' : ''}">Nuevas de hoy (${llamadasNue.length} hechas · cupo ${cupoNuevasTxt})</button>
           </div>
           ${chipsTec}
           <table class="hpl-lista">
             <tr><th>#</th><th>OTST</th><th>Tipo</th><th>Cliente</th><th>Tiempo</th><th>Técnico</th><th></th></tr>
             ${filasLista || `<tr><td colspan="7">${filtroTec.length ? 'No quedan OTST pendientes de tus técnicos en esta lista.' : 'No hay llamadas pendientes en esta lista.'}</td></tr>`}
           </table>
-          <div class="hpl-nota">Tu lista toma las siguientes OTST libres de la cola hasta completar tu cupo: seguimiento, lo más atrasado primero; nuevas, la de mayor antigüedad primero. ✅ = llamada hecha hoy (registrada al dar Continuar, o vista en el Libro de Trabajo)${sync ? '; 🔒 = otra persona la está llamando' : ''}.</div>
+          <div class="hpl-nota">Tu lista toma los siguientes clientes libres de la cola hasta completar tu cupo: seguimiento, lo más atrasado primero; nuevas, la de mayor antigüedad primero. Un cliente con varias OTST es <b>una sola llamada</b>: sus demás OTST van debajo (↳) y ⭐ marca la mayor, donde se deja el seguimiento; las demás se cierran con el mismo texto (la Llamada de Seguimiento lo rellena). ✅ = registrada hoy${sync ? '; 🔒 = otra persona está llamando a ese cliente' : ''}.</div>
         </div>
       </div>`;
 
@@ -841,7 +900,7 @@
     const filas = [['OTST', 'Cliente', 'Técnico Asignado', '¿En garantía?', 'Tipo', 'Fecha próximo contacto', 'Estado']];
     lista.items.forEach((it) => {
       const f = info[it.otst] || {};
-      filas.push([it.otst, f.cliente || '', f.tecnico || '', f.garantia ? 'SI' : 'NO', tipo[it.tipo] || it.tipo, fecha(it.fechaIni), it.hecha ? (it.hecha.accion === 'efectiva' ? 'Efectiva' : it.hecha.accion === 'reprogramada' ? `Reprogramada ${fecha(it.hecha.fecha)}`.trim() : 'Salió del estado') : 'Pendiente']);
+      filas.push([it.otst, f.cliente || '', f.tecnico || '', f.garantia ? 'SI' : 'NO', tipo[it.tipo] || it.tipo, fecha(it.fechaIni), it.falta ? 'Falta registrar (grupo)' : it.hecha ? (it.hecha.accion === 'efectiva' ? 'Efectiva' : it.hecha.accion === 'reprogramada' ? `Reprogramada ${fecha(it.hecha.fecha)}`.trim() : 'Salió del estado') : 'Pendiente']);
     });
     const csv = '﻿' + filas.map((r) => r.map((v) => q(String(v))).join(',')).join('\r\n');
     const a = document.createElement('a');
@@ -856,7 +915,7 @@
   function alClic(e) {
     // Al abrir una llamada se avisa al Sheet para que nadie más la tome (sin frenar el enlace)
     const ll = e.target.closest('a.llamar[data-otst]');
-    if (ll) { sincronizar({ tomar: ll.dataset.otst }); return; }
+    if (ll) { sincronizar({ tomar: (ll.dataset.otsts || ll.dataset.otst).split(',') }); return; }
     const b = e.target.closest('button, .hpl-top');
     if (!b) return;
     if (b.dataset.tab) { pestana = b.dataset.tab; render(); return; }

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Llamada de Seguimiento Diagnóstico - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.3.0
-// @description  En "Llamada de Seguimiento Diagnóstico" (OTST): deja por defecto "Contactar nuevamente, no fue posible establecer contacto", sugiere la fecha de próximo contacto (el primer día hábil con cupo según el Planificador de Llamadas; si no hay plan, hoy + 2 días hábiles) y muestra un calendario siempre abierto con atajos, festivos de Colombia y la carga de seguimientos de cada día. Si eliges "contacto efectivo" y das Continuar, pide confirmar que se cerrará la comunicación con la persona. Incluye mensajes rápidos guardables para la observación. Nunca presiona Continuar por ti.
+// @version      1.4.0
+// @description  En "Llamada de Seguimiento Diagnóstico" (OTST): deja por defecto "Contactar nuevamente, no fue posible establecer contacto", sugiere la fecha de próximo contacto (el primer día hábil con cupo según el Planificador de Llamadas; si no hay plan, hoy + 2 días hábiles) y muestra un calendario siempre abierto con atajos, festivos de Colombia y la carga de seguimientos de cada día. Si eliges "contacto efectivo" y das Continuar, pide confirmar que se cerrará la comunicación con la persona. Incluye mensajes rápidos guardables para la observación y llamada agrupada por cliente (encabezado "Orden relacionada con la OTST…"; las demás OTST del cliente se rellenan solas). Nunca presiona Continuar por ti.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*/diagnosiscall*
 // @grant        none
@@ -94,6 +94,7 @@
     return d.getMonth() === +m[2] - 1 ? d : null;
   }
 
+  const deClave = (k) => { const [y, m, d] = String(k).split('-').map(Number); return new Date(y, m - 1, d); };
   const mismoDia = (a, b) => a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
   // ─────────────────────────────────────────────
@@ -201,6 +202,18 @@
       #ot-ls-msgs .ls-chip .ls-x:hover { color: #c0392b; background: transparent; }
       #ot-ls-msgs .ls-guardar { border: 1px dashed #8fb0d6; background: #fff; color: #0b3d78; border-radius: 14px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
       #ot-ls-msgs .ls-guardar:hover { background: #eaf2fb; }
+      #ot-ls-grupo { margin: 4px 0 10px; padding: 9px 12px; border: 1px solid #c9b8ea; border-left: 4px solid #6b3fb5; border-radius: 8px; background: #f8f4ff; font-family: Arial, sans-serif; font-size: 12.5px; color: #1f2d3d; }
+      #ot-ls-grupo .lg-tit { font-weight: 700; color: #4a2a85; margin-bottom: 5px; }
+      #ot-ls-grupo .lg-estado { margin-bottom: 6px; }
+      #ot-ls-grupo .lg-otsts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 7px; }
+      #ot-ls-grupo label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+      #ot-ls-grupo label small { color: #6b7a8c; }
+      #ot-ls-grupo label.lg-seg { font-weight: 700; color: #4a2a85; }
+      #ot-ls-grupo .lg-acciones { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+      #ot-ls-grupo button { border: 1px solid #6b3fb5; background: #6b3fb5; color: #fff; border-radius: 14px; padding: 4px 12px; font-size: 12px; cursor: pointer; font-weight: 700; }
+      #ot-ls-grupo button:hover { background: #57319a; }
+      #ot-ls-grupo .lg-nota { color: #6b7a8c; font-size: 11.5px; }
+      #ot-ls-grupo .lg-ok { color: #2f855a; font-weight: 700; }
       #ot-ls-overlay { position: fixed; inset: 0; background: rgba(15,25,40,.55); z-index: 2147483000; display: flex; align-items: center; justify-content: center; }
       #ot-ls-modal { background: #fff; border-radius: 12px; padding: 24px 26px; max-width: 420px; width: calc(100% - 32px);
         box-shadow: 0 10px 40px rgba(0,0,0,.35); font-family: Arial, sans-serif; }
@@ -402,6 +415,153 @@
   }
 
   // ─────────────────────────────────────────────
+  // Llamada agrupada por cliente
+  // Con una sola llamada se atienden todas las OTST del cliente: todas llevan el
+  // mismo texto ("Orden relacionada con la OTST x1, …, xn. Se deja seguimiento
+  // en xn" + lo que se habló), se cierran con "contacto efectivo" y solo la
+  // mayor (xn) se reprograma. El grupo se recuerda durante el día: las demás
+  // OTST del grupo se rellenan solas y el Planificador lo cuenta como UNA llamada.
+  // ─────────────────────────────────────────────
+  const CLAVE_GRUPO = 'hanna_llamada_grupo';
+  const CLAVE_FILAS = 'hanna_pl_filas'; // última lectura del Libro de Trabajo (Planificador)
+  const RE_ENCABEZADO = /Orden relacionada con las? OTST\s*([\d\s,y.]+?)\s*\.?\s*Se deja (?:el )?seguimiento en (?:la )?(?:OTST\s*)?(\d+)\.?/i;
+  const otstActual = () => (location.pathname.match(/item\/(\d+)/) || [])[1] || '';
+  const ordenar = (l) => [...new Set(l.map(String))].sort((a, b) => +a - +b);
+  const textoEncabezado = (otsts, seg) => `Orden relacionada con la OTST ${otsts.join(', ')}. Se deja seguimiento en ${seg}`;
+
+  function leerEncabezado(texto) {
+    const m = (texto || '').match(RE_ENCABEZADO);
+    if (!m) return null;
+    return { otsts: ordenar((m[1].match(/\d{3,}/g) || []).concat(m[2])), seguimiento: m[2] };
+  }
+
+  function grupoGuardado() {
+    const g = leerJSON(CLAVE_GRUPO, null);
+    return g && g.dia === clave(new Date()) && Array.isArray(g.otsts) ? g : null;
+  }
+
+  // OTST del mismo cliente en "Llamada Seguimiento Diagnóstico" (según la última lectura del Planificador)
+  function otstsDelCliente(otst) {
+    const d = leerJSON(CLAVE_FILAS, null);
+    const filas = d && Array.isArray(d.filas) ? d.filas : [];
+    const yo = filas.find((f) => String(f.otst) === otst);
+    return yo ? { cliente: yo.cliente, filas: filas.filter((f) => f.cliente === yo.cliente) } : null;
+  }
+
+  function elegirAccion(select, efectivo) {
+    const op = opcion(select, efectivo ? /contacto con el cliente fue efectivo/i : /contactar nuevamente/i);
+    if (!op || select.value === op.value) return;
+    select.value = op.value;
+    try { const $ = window.jQuery; if ($) $(select).trigger('change'); } catch (e) {}
+    disparar(select);
+  }
+
+  // Pone (o reemplaza) el encabezado como primera línea de la Observación
+  function ponerEncabezado(area, texto) {
+    const lineas = area.value.split(/\r?\n/);
+    const resto = RE_ENCABEZADO.test(lineas[0] || '') ? lineas.slice(1) : lineas;
+    area.value = resto.join('').trim() ? [texto, ...resto].join('\n') : texto + '\n';
+    disparar(area);
+    area.focus();
+    area.setSelectionRange(area.value.length, area.value.length);
+  }
+
+  // Al abrir otra OTST de un grupo ya iniciado hoy: mismo texto, mismo contacto y la acción que le toca
+  function prellenarGrupo(select, area, g, otst) {
+    if (!area.value.trim() && g.texto) { area.value = g.texto; disparar(area); }
+    const contacto = inputTrasEtiqueta('Nombre Contacto');
+    if (contacto && !contacto.value.trim() && g.contacto) { contacto.value = g.contacto; disparar(contacto); }
+    const esSeg = otst === g.seguimiento;
+    elegirAccion(select, !esSeg);
+    if (esSeg && g.fecha) {
+      setTimeout(() => {
+        const input = inputTrasEtiqueta('Fecha para Próximo Contacto');
+        if (!input) return;
+        input.dataset.lsSugerida = '1';
+        input.value = formatear(deClave(g.fecha));
+        disparar(input);
+        asegurarCalendario(select);
+      }, 200);
+    }
+  }
+
+  function dibujarGrupo(caja, select, area, cli, g, otst) {
+    const hoyK = clave(new Date());
+    const registradas = new Set(leerJSON(CLAVE_LOG, []).filter((e) => e && e.ts && clave(new Date(e.ts)) === hoyK).map((e) => String(e.otst)));
+    const info = {};
+    (cli ? cli.filas : []).forEach((f) => { info[f.otst] = f; });
+    const todas = ordenar([...Object.keys(info), ...(g ? g.otsts : []), otst]);
+    const marcadas = new Set(g ? g.otsts : todas);
+    const cliente = (cli && cli.cliente) || '';
+
+    caja.innerHTML = '';
+    const tit = document.createElement('div'); tit.className = 'lg-tit';
+    tit.textContent = `🔗 Llamada agrupada${cliente ? ' — ' + cliente : ''}: ${todas.length} OTST`;
+    const est = document.createElement('div'); est.className = 'lg-estado';
+    const cont = document.createElement('div'); cont.className = 'lg-otsts';
+    const checks = todas.map((o) => {
+      const l = document.createElement('label');
+      const c = document.createElement('input'); c.type = 'checkbox'; c.value = o; c.checked = marcadas.has(o);
+      if (o === otst) { c.disabled = true; c.checked = true; }
+      const f = info[o];
+      const det = registradas.has(o) && o !== otst ? '✅ registrada hoy'
+        : !f ? '' : f.fecha ? (f.fecha < hoyK ? 'vencida ' : '') + f.fecha.split('-').reverse().slice(0, 2).join('/') : 'sin contacto';
+      const sm = document.createElement('small');
+      sm.textContent = o === otst ? `(esta${det ? ', ' + det : ''})` : det ? `(${det})` : '';
+      l.append(c, ` ${o} `, sm);
+      c.addEventListener('change', pintar);
+      cont.appendChild(l);
+      return { c, l };
+    });
+    const acc = document.createElement('div'); acc.className = 'lg-acciones';
+    const b = document.createElement('button'); b.type = 'button';
+    const nota = document.createElement('span'); nota.className = 'lg-nota';
+    acc.append(b, nota);
+    caja.append(tit, est, cont, acc);
+
+    function elegidas() { return ordenar(checks.filter((x) => x.c.checked).map((x) => x.c.value)); }
+    function pintar() {
+      const sel = elegidas();
+      const seg = sel[sel.length - 1];
+      checks.forEach((x) => x.l.classList.toggle('lg-seg', x.c.value === seg));
+      const accion = otst === seg ? 'aquí queda el seguimiento (Contactar nuevamente + fecha)' : 'se cierra con «contacto efectivo»';
+      est.textContent = '';
+      if (g) {
+        const faltan = sel.filter((o) => !(g.hechas || []).includes(o) && o !== otst);
+        const ok = document.createElement('span'); ok.className = 'lg-ok';
+        ok.textContent = `Grupo iniciado hoy (${(g.hechas || []).length} de ${g.otsts.length} registradas). `;
+        est.append(ok, `Esta OTST: ${accion}. ${faltan.length ? 'Después faltan: ' + faltan.join(', ') + '.' : 'Es la última del grupo.'}`);
+      } else {
+        est.textContent = `¿Con esta llamada atiendes varias? Marca cuáles. El seguimiento queda en la mayor (${seg}); las demás se cierran. Esta OTST: ${accion}.`;
+      }
+      b.textContent = g ? 'Actualizar encabezado' : 'Insertar encabezado';
+      nota.textContent = `«${textoEncabezado(sel, seg)}» — escribe debajo lo que se habló. Al dar Continuar, el texto queda listo para las demás OTST del grupo.`;
+    }
+    b.addEventListener('click', () => {
+      const sel = elegidas();
+      const seg = sel[sel.length - 1];
+      ponerEncabezado(area, textoEncabezado(sel, seg));
+      elegirAccion(select, otst !== seg);
+    });
+    pintar();
+  }
+
+  function asegurarGrupo(select) {
+    const area = (select.form || document).querySelector('textarea');
+    if (!area || document.getElementById('ot-ls-grupo')) return;
+    const otst = otstActual();
+    const guardado = grupoGuardado();
+    const g = guardado && guardado.otsts.includes(otst) && !(guardado.hechas || []).includes(otst) ? guardado : null;
+    const cli = otstsDelCliente(otst);
+    if (!g && (!cli || cli.filas.length < 2)) return;
+    const caja = document.createElement('div'); caja.id = 'ot-ls-grupo';
+    const ref = document.getElementById('ot-ls-msgs') || document.getElementById('ot-ls-fila') || area.closest('.resizable-textarea, .form-textarea-wrapper') || area.parentElement;
+    ref.parentNode.insertBefore(caja, ref);
+    if (g) prellenarGrupo(select, area, g, otst);
+    dibujarGrupo(caja, select, area, cli, g, otst);
+  }
+
+  // ─────────────────────────────────────────────
   // Confirmación al cerrar la comunicación
   // ─────────────────────────────────────────────
   let confirmado = false;
@@ -451,11 +611,28 @@
   function registrarLlamada(e, select) {
     if (registrado || e.defaultPrevented) return;
     registrado = true;
-    const otst = (location.pathname.match(/item\/(\d+)/) || [])[1] || '';
+    const otst = otstActual();
     const efectivo = esEfectivo(select);
     const fecha = !efectivo && estado.input ? parsear(estado.input.value) : null;
+    const entrada = { otst, ts: new Date().toISOString(), accion: efectivo ? 'efectiva' : 'reprogramada', fecha: fecha ? clave(fecha) : null };
+    // Llamada agrupada: la Observación empieza con "Orden relacionada con la OTST…"
+    const area = (select.form || document).querySelector('textarea');
+    const enc = area ? leerEncabezado(area.value) : null;
+    if (enc && enc.otsts.includes(otst)) {
+      entrada.grupo = enc.seguimiento;
+      entrada.otsts = enc.otsts;
+      const prev = grupoGuardado();
+      const mismo = prev && prev.seguimiento === enc.seguimiento;
+      const contacto = inputTrasEtiqueta('Nombre Contacto');
+      guardarJSON(CLAVE_GRUPO, {
+        dia: clave(new Date()), seguimiento: enc.seguimiento, otsts: enc.otsts, texto: area.value,
+        contacto: contacto && contacto.value.trim() ? contacto.value.trim() : mismo ? prev.contacto || '' : '',
+        fecha: fecha && otst === enc.seguimiento ? clave(fecha) : mismo ? prev.fecha || null : null,
+        hechas: [...new Set([...(mismo ? prev.hechas || [] : []), otst])],
+      });
+    }
     const log = leerJSON(CLAVE_LOG, []);
-    log.push({ otst, ts: new Date().toISOString(), accion: efectivo ? 'efectiva' : 'reprogramada', fecha: fecha ? clave(fecha) : null });
+    log.push(entrada);
     guardarJSON(CLAVE_LOG, log.slice(-3000));
     const plan = leerJSON(CLAVE_PLAN, null);
     if (plan && plan.carga && fecha) {
@@ -498,6 +675,7 @@
     }
     asegurarMensajes(select);
     asegurarCalendario(select);
+    asegurarGrupo(select);
   }
 
   preparar();
