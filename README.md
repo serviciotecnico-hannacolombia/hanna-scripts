@@ -18,7 +18,7 @@ Instala solo los que uses — cada uno vive en su propia página de la intranet 
 | **Autocompletar Cotización SGV** | `.../sgv/ingresos/cotizaciones/crear` | Llena Fecha Primer Seguimiento (+2 días hábiles) y Fecha Cierre (+2 meses, ajustada a día hábil), agrega el comentario de la OTST relacionada si aplica, y completa "Información de Aplicación" con un texto por defecto. Solo llena campos vacíos. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/cotizacion-sgv.user.js) |
 | **Entrega de Solución SACI** | `regional.hannacolombia.com/saci/item/*/solucion_entrega` | Botón "Cargar solución de calibración": pide el link de seguimiento (`https://servicio.tecnico.hannacolombia.com/calibraciones/<código>`, o solo el código) y llena "Observaciones" con el mensaje estándar de entrega con ese link. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/saci-entrega-solucion.user.js) |
 | **Guardar Contacto en Google Contacts** | `.../stecnico/item/N` (solo detalle de la OT) | Resalta cada teléfono del contacto en la OT y revisa número por número si ya está guardado (gris "Buscando…" → verde con el primer nombre, o amarillo "No guardado"); al hacer clic ("Crear contacto") abre un cuadro de confirmación editable y, al aceptar, crea el contacto en Google Contacts con etiqueta "Client" y foto aleatoria, sin duplicar. Nombre, apellido y empresa siempre en MAYÚSCULAS. Requiere un Apps Script propio (ver sección abajo). | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/contactos-google.user.js) |
-| **Planificador de Llamadas** | `.../stecnico/libro_trabajo` y `.../stecnico/agenda-llamadas` | **Agenda rápida** (abre al instante y se actualiza sola en segundo plano) + panel sobre "Esperando Llamada Seguimiento Diagnóstico": lista del día con cupo (40 = máx. 10 de seguimiento + nuevas sin contacto), carga de los próximos días hábiles (con festivos de Colombia), alertas, antigüedad, tendencia y avance del día. Opcional: **☁ Sheets** para indicadores en Google Sheets y **llamar entre varias personas a la vez** (cola compartida, filtro por técnico). | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/planificador-llamadas.user.js) |
+| **Planificador de Llamadas** | `.../stecnico/libro_trabajo` y `.../stecnico/agenda-llamadas` | **Agenda rápida** (abre al instante y se actualiza sola en segundo plano) + panel sobre "Esperando Llamada Seguimiento Diagnóstico": lista única del día (todas las de seguimiento vencidas y de hoy + nuevas sin contacto hasta completar el cupo de 40, con aviso si se pasa), carga de los próximos días hábiles (con festivos de Colombia), alertas, antigüedad, tendencia y avance del día. Opcional: **☁ Sheets** para indicadores en Google Sheets y **llamar entre varias personas a la vez** (cola compartida, filtro por técnico). | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/planificador-llamadas.user.js) |
 | **Llamada de Seguimiento Diagnóstico** | `.../stecnico/item/*/diagnosiscall` | Deja "Contactar nuevamente" por defecto, calendario siempre abierto con festivos y la carga de cada día (verde/amarillo/rojo), sugiere el primer día con cupo, mensajes rápidos y confirmación antes de cerrar la comunicación. Nunca presiona Continuar. | [Instalar](https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/llamada-seguimiento.user.js) |
 
 ## Instalación (una sola vez, por persona, por cada script)
@@ -445,11 +445,13 @@ Los dos scripts trabajan juntos (comparten el almacenamiento del navegador en la
 
 1. **Planificador** (Libro de Trabajo): cada vez que lo abres toma una foto de *Esperando Llamada Seguimiento Diagnóstico* y arma el plan:
    - **Seguimiento** (vencidas + agendadas): máx. **10 por día hábil**, lo más atrasado primero. Si un día ya tiene 10, el excedente se corre al siguiente día con cupo.
-   - **Nuevas** (sin fecha de próximo contacto): el resto del cupo diario (40 − seguimientos), de la más antigua a la más reciente.
-   - **Tu lista de hoy** toma los siguientes clientes libres de la cola hasta completar tu cupo (lo que ya llamaste queda con ✅ arriba). Cada OTST que cambia de fecha o sale del estado suma al avance.
+   - **Nuevas** (sin fecha de próximo contacto): de la más antigua a la más reciente.
+   - **Tu lista de hoy** es una sola lista: primero **todas** las de seguimiento vencidas y de hoy (lo más atrasado primero, aunque pasen de tu cupo), luego las nuevas que faltan para completar tu cupo (40, contando lo ya hecho y las de garantía y prioritarias pendientes) y al final las que ya llamaste (✅). Cada OTST que cambia de fecha o sale del estado suma al avance.
+   - Si lo de seguimiento (más lo hecho, garantía y prioritarias) pasa de tu cupo, sale arriba la alerta roja **⚠ Hoy tienes N llamadas… X más que tu cupo** y el título de la lista muestra **+X sobre el cupo**; ese día no entran nuevas. Si solo pasa de tu máximo de seguimiento, la alerta es amarilla.
+   - El número de la OTST la abre en una **pestaña nueva** (no hay botón Llamar).
    - La lista **no es una foto fija del día**: se rearma con cada lectura del Libro de Trabajo, así que las OTST que los ingenieros pasan a este estado durante el día entran a la cola (en *Nuevas*, detrás de las más antiguas). La primera foto del día solo sirve para contar el avance (qué se llamó hoy y si era seguimiento o nueva).
-   - **Un cliente con varias OTST = una llamada**: sus demás OTST van debajo (↳) sin gastar cupo, con el nombre del contacto de cada una (para ver si es la misma persona). ⭐ marca la mayor, donde se deja el seguimiento.
-   - ⚙️ **Cupos**: tus llamadas por día, cuántas de ellas son de seguimiento, y el máximo de reprogramaciones por día de todo el equipo (lo que se agenda en la intranet, por defecto 10).
+   - **Un cliente con varias OTST = una llamada**: arriba va la mayor (⭐, donde se registra y se deja el seguimiento) y sus demás OTST van debajo (↳) sin gastar cupo, con el nombre del contacto de cada una (para ver si es la misma persona).
+   - ⚙️ **Cupos**: tus llamadas por día, cuántas esperas que sean de seguimiento (para el aviso amarillo y las proyecciones; las vencidas y de hoy siempre salen todas), y el máximo de reprogramaciones por día de todo el equipo (lo que se agenda en la intranet, por defecto 10).
    - **Mis técnicos**: chips con los técnicos de la columna *Técnico*. Marca los tuyos y tu lista solo toma sus OTST ("yo llamo los de Germán, tú los de Wilfor"). *Todos* quita el filtro.
 2. **Llamada de Seguimiento** (`.../diagnosiscall`): pinta cada día del calendario según la carga planeada (verde con cupo, amarillo casi lleno, rojo lleno), tacha los festivos, propone la fecha **Sugerida** y avisa si eliges un día lleno. Al dar Continuar suma esa llamada a la carga del día elegido, para que la siguiente sugerencia ya la cuente.
 
@@ -457,7 +459,7 @@ Los dos scripts trabajan juntos (comparten el almacenamiento del navegador en la
 
 Cuando un cliente tiene varias OTST se hace **una sola llamada**: todas llevan el mismo texto, se cierran con *contacto efectivo* y solo la mayor queda abierta (reprogramada). Así, la próxima vez sale una sola llamada.
 
-1. En la agenda, **📞 Llamar** en el cliente: abre directamente la **mayor** (⭐, xn) y todas sus OTST quedan 🔒 para los demás.
+1. En la agenda, abre la OTST de arriba del cliente (la **mayor**, ⭐, xn) con clic en su número: se abre en una pestaña nueva y todas sus OTST quedan 🔒 para los demás.
 2. En la llamada aparece el recuadro **🔗 Llamada agrupada** con las OTST del cliente: desmarca las que no correspondan (p. ej. otro contacto) y dale **Insertar encabezado**. Pone como primera línea de la Observación:
    `Orden relacionada con la OTST x1, x2, …, xn. Se deja seguimiento en xn` (xn = la mayor)
 3. Escribe debajo lo que se habló, el nombre del contacto, *Contactar nuevamente* y la fecha, y dale **Continuar**.
@@ -474,16 +476,16 @@ Si escribes el encabezado a mano con ese formato también se reconoce. El grupo 
 
 ### Garantía 🛡: llamar lo antes posible
 
-Las OTST en garantía van en su propio bloque amarillo **🛡 Garantía — llamar lo antes posible**, arriba de tus pestañas (debajo de las prioritarias): las vencidas, las de hoy y las sin contacto, de **todos los técnicos** (sin el filtro de *Mis técnicos*) y **sin gastar el cupo** de la lista normal. Las que ya tienen fecha a futuro esperan ese día y aparecen ahí cuando llegue. Un cliente con varias OTST en garantía es una llamada; sus OTST que no son de garantía no salen en tu lista normal ese día (para no llamarlo dos veces). Con ☁ Sheets, lo que otra persona está llamando sale con 🔒.
+Las OTST en garantía van en su propio bloque amarillo **🛡 Garantía — llamar lo antes posible**, arriba de tu lista (debajo de las prioritarias): las vencidas, las de hoy y las sin contacto, de **todos los técnicos** (sin el filtro de *Mis técnicos*) y **sin gastar el cupo** de la lista normal. Las que ya tienen fecha a futuro esperan ese día y aparecen ahí cuando llegue. Un cliente con varias OTST en garantía es una llamada; sus OTST que no son de garantía no salen en tu lista normal ese día (para no llamarlo dos veces). Con ☁ Sheets, lo que otra persona está llamando sale con 🔒.
 
 ### OTST prioritarias 🚩
 
 Para cuando un asesor pide llamar a un cliente con atención especial:
 
 - **Clic derecho** sobre una fila de la agenda (o de la tabla del Libro de Trabajo) → escribe el motivo o quién lo pidió. Clic derecho otra vez sobre una prioritaria = quitarle la prioridad.
-- **🚩 Agregar prioritaria** (junto a las pestañas): escribe el número de cualquier OTST. Si no está en *Llamada Seguimiento Diagnóstico*, el script abre su página de detalle y trae el cliente, el técnico responsable, si algún equipo está en garantía y el estado actual.
-- Salen en el recuadro rojo **🚩 Prioritarias**, arriba de tus pestañas, sin importar el filtro de *Mis técnicos*, con el motivo y quién la marcó. Su cliente no se repite en la lista normal.
-- Se dan por atendidas solas al registrar la llamada (Continuar en la Llamada de Seguimiento). Si la OTST está en otro estado (sin formulario de llamada en la intranet): **📞 Ver OTST** y, después de llamar, **✔ Llamada hecha** (cuenta como llamada del día). **✕** quita la prioridad.
+- **🚩 Agregar prioritaria** (junto al título de la lista): escribe el número de cualquier OTST. Si no está en *Llamada Seguimiento Diagnóstico*, el script abre su página de detalle y trae el cliente, el técnico responsable, si algún equipo está en garantía y el estado actual.
+- Salen en el recuadro rojo **🚩 Prioritarias**, arriba de tu lista, sin importar el filtro de *Mis técnicos*, con el motivo y quién la marcó. Su cliente no se repite en la lista normal.
+- Se dan por atendidas solas al registrar la llamada (Continuar en la Llamada de Seguimiento). Si la OTST está en otro estado (sin formulario de llamada en la intranet): abre la OTST con su número y, después de llamar, **✔ Llamada hecha** (cuenta como llamada del día). **✕** quita la prioridad.
 - En la Llamada de Seguimiento de esa OTST aparece el aviso **🚩 OTST prioritaria** con el motivo.
 - Con ☁ Sheets las prioritarias se comparten con todo el equipo (hoja **Prioritarias**: quién la marcó, cuándo y quién la atendió).
 
@@ -501,7 +503,7 @@ El Libro de Trabajo tarda ~6 s (arma llamadas, cotizaciones y pedidos a la vez).
 
 - **Abre al instante** con la última lista guardada y lee el Libro de Trabajo **en segundo plano**: al abrirla (si los datos tienen más de 5 min), al volver a la pestaña después de una llamada (mismo criterio), cada 10 min, o con **↻ Actualizar**. Arriba dice "Datos hace X min".
 - La lista de hoy va primero; los gráficos y alertas, debajo.
-- **📞 Llamar** y el número de OTST abren siempre la misma pestaña secundaria (no se acumulan pestañas).
+- El número de OTST abre la OTST en una **pestaña nueva**.
 - Al dar **Continuar** en la llamada (con *Llamada de Seguimiento* instalado), la OTST queda ✅ en la agenda **al instante**, sin esperar la siguiente lectura del Libro.
 - **⬇ CSV de hoy** descarga la lista del día con las columnas `OTST, Cliente, Técnico Asignado, ¿En garantía?` (SI/NO) + `Tipo, Fecha próximo contacto, Estado`, lista para Excel.
 - Sin ☁ Sheets todo se guarda en el navegador (localStorage de la intranet).
@@ -511,7 +513,7 @@ El Libro de Trabajo tarda ~6 s (arma llamadas, cotizaciones y pedidos a la vez).
 Con el Apps Script `agenda-llamadas.gs` la agenda guarda cada llamada en un Google Sheet y se coordina con las demás personas:
 
 - **Cola compartida en tiempo casi real** (cada 20 s y al volver a la pestaña): lo que llama otra persona sale de tu lista y aparece ✅ en el avance del equipo.
-- Al dar **📞 Llamar** la OTST queda **🔒 en llamada** con tu nombre para los demás (se libera sola a los 20 min o al registrar la llamada). Debajo de tu lista ves las que otros están llamando, con **Llamar igual** por si hace falta.
+- Al abrir una OTST de tu lista (clic en su número) el cliente queda **🔒 en llamada** con tu nombre para los demás (se libera sola a los 20 min o al registrar la llamada). Debajo de tu lista ves las que otros están llamando; si hace falta, igual puedes abrirlas desde su número.
 - Arriba: **🟢 En línea con …** (quién está conectado) o **🔴 Sin Sheet** si falla (la agenda sigue funcionando sola).
 - **🏁 Carrera del día** (con 2 o más personas): debajo de los indicadores, cada persona con su barra hacia su meta (su cupo diario), 🥇🥈🥉, quién va ganando y por cuántas llamadas, seguimiento/nuevas, efectivas, ritmo por hora y hace cuánto fue su última llamada. Cuenta llamadas (un cliente agrupado = 1); en empate gana quien llegó primero a ese número. 🏆 al llegar a la meta.
 - El cupo es **por persona** (⚙️ Cupos en cada navegador); la proyección de nuevas suma el cupo de todas las personas conectadas.
