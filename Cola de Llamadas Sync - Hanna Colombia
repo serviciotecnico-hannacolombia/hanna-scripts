@@ -1,0 +1,1190 @@
+// ==UserScript==
+// @name         Cola de Llamadas Sync - Hanna Colombia
+// @namespace    https://intranet.hannacolombia.com/
+// @version      0.3.0
+// @description  Conecta la intranet con la app de Servicio Técnico (módulo Llamadas). En el Libro de Trabajo: envía la lista "Esperando Llamada Seguimiento Diagnóstico" (y la relee cada 10 min con cualquier pestaña de la intranet abierta). En el formulario "Llamada de Seguimiento Diagnóstico": fecha sugerida con la carga real del equipo, calendario con festivos, mensajes rápidos compartidos, avisos de prioritaria y de quién está llamando, llamada agrupada por cliente y registro de la llamada en la bitácora al dar Continuar. Nunca presiona Continuar por ti (salvo el cierre automático del grupo, si lo activas en la app).
+// @author       Servicio Técnico Hanna Colombia
+// @match        https://intranet.hannacolombia.com/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @connect      mmawukdxoryswwnjhydl.supabase.co
+// @run-at       document-idle
+// ==/UserScript==
+
+// Diseño: docs/llamadas-tiempo-real.md (fases 1 y 3).
+// Configuración: menú de Tampermonkey → "Configurar token de llamadas". El token
+// se genera en la app (módulo Llamadas) y es personal: identifica quién envió la
+// lectura o registró la llamada. Se guarda en Tampermonkey, no en la intranet.
+// Reemplaza a los userscripts "Planificador de Llamadas" y "Llamada de
+// Seguimiento Diagnóstico": desactívalos para que no dupliquen el calendario.
+
+(function () {
+  'use strict';
+
+  const VERSION = '0.3.0';
+  const ENDPOINT = 'https://mmawukdxoryswwnjhydl.supabase.co/functions/v1/llamadas-sync';
+  const URL_LIBRO = '/stecnico/libro_trabajo';
+  const ES_LIBRO = location.pathname.startsWith(URL_LIBRO);
+  const ES_LLAMADA = /^\/stecnico\/item\/\d+\/diagnosiscall/.test(location.pathname);
+  const CADA_MS = 10 * 60 * 1000;     // relectura en segundo plano
+  const REVISAR_MS = 60 * 1000;       // cada cuánto una pestaña mira si ya toca
+  const BLOQUEO_MS = 2 * 60 * 1000;   // una sola pestaña lee a la vez
+
+  const G = {
+    token: 'hll_token', ultima: 'hll_ultima_lectura', bloqueo: 'hll_bloqueo', estado: 'hll_estado',
+    pendientes: 'hll_pendientes',     // llamadas registradas aún no confirmadas por la app
+    grupo: 'hll_grupo_aviso',         // llamada agrupada en curso: OTST que faltan por registrar
+  };
+
+  // ─────────────────────────────────────────────
+  // Utilidades
+  // ─────────────────────────────────────────────
+  const norm = (t) => (t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const limpio = (t) => (t || '').replace(/\s+/g, ' ').trim();
+  const pad = (n) => String(n).padStart(2, '0');
+  const clave = (f) => `${f.getFullYear()}-${pad(f.getMonth() + 1)}-${pad(f.getDate())}`;
+  const deClave = (k) => { const [y, m, d] = String(k).split('-').map(Number); return new Date(y, m - 1, d); };
+  const d0 = (f) => new Date(f.getFullYear(), f.getMonth(), f.getDate());
+  const mismoDia = (a, b) => a && b && clave(a) === clave(b);
+
+  function parsear(txt) {
+    const m = (txt || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (!m) return null;
+    const d = new Date(+m[3], +m[2] - 1, +m[1]);
+    return d.getMonth() === +m[2] - 1 ? d : null;
+  }
+  // El sitio usa DD/MM/AAAA
+  const formatear = (f) => `${pad(f.getDate())}/${pad(f.getMonth() + 1)}/${f.getFullYear()}`;
+
+  // "19sem 5d 16h 59m" / "1d 23h 42m" / "21h 39m" -> días enteros
+  function diasDe(txt) {
+    const n = (re) => +((txt.match(re) || [])[1] || 0);
+    return Math.floor(n(/(\d+)\s*sem/) * 7 + n(/(\d+)\s*d\b/) + n(/(\d+)\s*h\b/) / 24);
+  }
+
+  const uuid = () => (crypto.randomUUID ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0; return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+    }));
+
+  // ── Festivos de Colombia (igual que src/lib/colombiaCalendar.ts de la app) ──
+  function pascua(y) {
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+    const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const x = h + l - 7 * m + 114;
+    return new Date(y, Math.floor(x / 31) - 1, (x % 31) + 1);
+  }
+  const cacheFestivos = {};
+  function festivos(y) {
+    if (cacheFestivos[y]) return cacheFestivos[y];
+    const s = new Set();
+    const add = (f) => s.add(clave(f));
+    const alLunes = (f) => { const r = d0(f); while (r.getDay() !== 1) r.setDate(r.getDate() + 1); return r; };
+    [[0, 1], [4, 1], [6, 20], [7, 7], [11, 8], [11, 25]].forEach(([m, d]) => add(new Date(y, m, d)));
+    const trasladables = [[0, 6], [2, 19], [5, 29], [7, 15], [9, 12], [10, 1], [10, 11]];
+    if (y >= 2026) trasladables.push([6, 9]); // Ley 2578 de 2026
+    trasladables.forEach(([m, d]) => add(alLunes(new Date(y, m, d))));
+    const p = pascua(y);
+    [-3, -2].forEach((n) => { const r = new Date(p); r.setDate(r.getDate() + n); add(r); });
+    [39, 59, 70].forEach((n) => { const r = new Date(p); r.setDate(r.getDate() + n); add(alLunes(r)); });
+    return (cacheFestivos[y] = s);
+  }
+  const esFinDeSemana = (f) => f.getDay() === 0 || f.getDay() === 6;
+  const esFestivo = (f) => festivos(f.getFullYear()).has(clave(f));
+  const esHabil = (f) => !esFinDeSemana(f) && !esFestivo(f);
+  function sigHabil(f) { const r = d0(f); do { r.setDate(r.getDate() + 1); } while (!esHabil(r)); return r; }
+  function sumarHabiles(f, n) { let r = d0(f); for (let i = 0; i < n; i++) r = sigHabil(r); return r; }
+  function ajustarHabil(f) { const r = d0(f); while (!esHabil(r)) r.setDate(r.getDate() + 1); return r; }
+
+  // ─────────────────────────────────────────────
+  // Lectura de la tabla del Libro (se ubica por el texto de los encabezados)
+  // ─────────────────────────────────────────────
+  function tablaLlamadas(raiz) {
+    return [...raiz.querySelectorAll('table')].find((t) =>
+      t.rows.length > 1 && !t.classList.contains('sticky-header') && /fecha próximo contacto/i.test(t.rows[0].textContent)) || null;
+  }
+
+  function leerFilas(t) {
+    const cab = [...t.rows[0].cells].map((c) => norm(c.textContent));
+    const col = (re) => cab.findIndex((h) => re.test(h));
+    const iO = col(/^otst/), iE = col(/estado/), iT = col(/^tiempo/), iF = col(/próximo contacto/),
+      iC = col(/^cliente/), iTec = col(/técnico/), iG = col(/garant/);
+    if (iO < 0) throw new Error('la tabla no tiene columna OTST (¿cambió la intranet?)');
+    return [...t.rows].slice(1).map((r) => {
+      const c = r.cells;
+      const tx = (i) => (i >= 0 && c[i] ? limpio(c[i].textContent) : '');
+      const otst = (tx(iO).match(/\d+/) || [])[0];
+      if (!otst) return null;
+      const f = parsear(tx(iF));
+      const sem = iE >= 0 && c[iE] ? c[iE].querySelector('[class*="semaforo_"]') : null;
+      return {
+        otst,
+        cliente: tx(iC),
+        tecnico: tx(iTec),
+        garantia: iG >= 0 && !/^no$/i.test(tx(iG)),
+        proximo_contacto: f ? clave(f) : null,
+        dias: iT >= 0 ? diasDe(tx(iT)) : null,
+        semaforo: sem ? (sem.className.match(/semaforo_(\w+)/) || [])[1] || '' : '',
+      };
+    }).filter(Boolean);
+  }
+
+  // Filtro "Modo" del Libro de Trabajo: se guarda en la sesión de la intranet (la URL
+  // no cambia) y aplica también a la lectura en segundo plano. El desplegable NO es
+  // confiable: Drupal lo pinta en "Sólo items de hoy" aunque la lista muestre todos.
+  // Por eso el modo se deduce de los datos:
+  //   - "Sólo items de hoy" solo trae OTST con fecha de hoy o sin fecha.
+  //   - "Todos los items" trae también vencidas y futuras.
+  // Completa = hay alguna fecha distinta de hoy Y el número del encabezado
+  // "Esperando Llamada Seguimiento Diagnóstico (N)" (si se encuentra) coincide con
+  // las filas leídas. Ante la duda es parcial, que nunca marca salidas.
+  function totalDeclarado(doc) {
+    const m = (doc.body ? doc.body.textContent : '').match(/Esperando Llamada Seguimiento Diagn\S*\s*\((\d+)\)/i);
+    return m ? +m[1] : null;
+  }
+
+  function deducirModo(doc, filas) {
+    const hoy = clave(new Date());
+    const fueraDeHoy = filas.filter((f) => f.proximo_contacto && f.proximo_contacto !== hoy).length;
+    const declarado = totalDeclarado(doc);
+    const cuadra = declarado === null || declarado === filas.length;
+    const completa = fueraDeHoy > 0 && cuadra;
+    const modo = completa ? 'Todos los items (detectado)'
+      : !cuadra ? `Parcial: ${filas.length} de ${declarado} filas`
+      : 'Sólo items de hoy (detectado)';
+    return { modo, completa };
+  }
+
+  // { filas, vacia, modo, completa } o lanza error si la página no es la esperada
+  function leerDocumento(doc) {
+    const t = tablaLlamadas(doc);
+    if (t) {
+      const filas = leerFilas(t);
+      return { filas, vacia: false, ...deducirModo(doc, filas) };
+    }
+    if (/Esperando Llamada Seguimiento Diagn/i.test(doc.body ? doc.body.textContent : '')) {
+      return { filas: [], vacia: true, modo: 'Lista vacía', completa: false };
+    }
+    throw new Error('no se encontró la lista (¿se cerró la sesión de la intranet?)');
+  }
+
+  // ─────────────────────────────────────────────
+  // Envío a llamadas-sync
+  // ─────────────────────────────────────────────
+  function enviar(cuerpo) {
+    const token = GM_getValue(G.token, '');
+    if (!token) return Promise.reject(new Error('falta configurar el token (menú de Tampermonkey)'));
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: ENDPOINT,
+        headers: { 'Content-Type': 'application/json', 'x-llamadas-token': token },
+        data: JSON.stringify(cuerpo),
+        timeout: 30000,
+        onload: (r) => {
+          let d = null;
+          try { d = JSON.parse(r.responseText); } catch (e) { /* respuesta no JSON */ }
+          if (r.status >= 200 && r.status < 300 && d && d.ok) { resolve(d); return; }
+          const err = new Error((d && d.error) || `HTTP ${r.status}`);
+          err.rechazada = !!(d && d.rechazada);
+          err.definitivo = !!(d && d.definitivo) || r.status === 401;
+          reject(err);
+        },
+        onerror: () => reject(new Error('sin conexión con la app')),
+        ontimeout: () => reject(new Error('la app no respondió a tiempo')),
+      });
+    });
+  }
+
+  function guardarEstado(e) {
+    GM_setValue(G.estado, { ...e, ts: Date.now() });
+    pintar();
+  }
+
+  async function sincronizar(doc, forzar = false) {
+    const { filas, vacia, modo, completa } = leerDocumento(doc);
+    if (forzar && !completa) throw new Error(`para forzar, la lista debe estar completa (${modo})`);
+    let r;
+    try {
+      r = await enviar({ accion: 'cola', completa, modo, vacia, filas, forzar, version: VERSION });
+    } catch (e) {
+      if (e.rechazada) {
+        guardarEstado({ ok: false, texto: `Lectura rechazada: ${e.message}. Si es correcto, usa «Forzar envío» en el menú de Tampermonkey.` });
+        return null;
+      }
+      throw e;
+    }
+    GM_setValue(G.ultima, Date.now());
+    guardarEstado({
+      ok: true,
+      texto: completa
+        ? `${r.total} OTST enviadas (+${r.entraron} / −${r.salieron})`
+        : `${r.total} OTST enviadas como parcial (${modo}). Para la cola completa pon Modo en «Todos los items» y dale Filtrar`,
+    });
+    return r;
+  }
+
+  // Lectura en segundo plano: una sola pestaña a la vez, y solo si ya pasó el intervalo
+  async function quizasReleer() {
+    if (!GM_getValue(G.token, '')) return;
+    const ahora = Date.now();
+    if (ahora - GM_getValue(G.ultima, 0) < CADA_MS) return;
+    if (ahora - GM_getValue(G.bloqueo, 0) < BLOQUEO_MS) return;
+    GM_setValue(G.bloqueo, ahora);
+    GM_setValue(G.ultima, ahora); // si falla (sesión cerrada…), no se reintenta hasta el próximo intervalo
+    try {
+      const r = await fetch(URL_LIBRO, { credentials: 'same-origin' });
+      const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+      await sincronizar(doc);
+    } catch (e) {
+      guardarEstado({ ok: false, texto: e.message });
+    } finally {
+      GM_setValue(G.bloqueo, 0);
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // Indicador en el Libro de Trabajo
+  // ─────────────────────────────────────────────
+  function pintar() {
+    if (!ES_LIBRO) return;
+    let el = document.getElementById('hll-estado');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'hll-estado';
+      el.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:2147483000;padding:7px 12px;border-radius:16px;'
+        + 'font:12px Arial,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.2);cursor:pointer;max-width:360px';
+      el.title = 'Cola de llamadas → app de Servicio Técnico. Clic para enviar de nuevo.';
+      el.addEventListener('click', () => enviarEstaPagina());
+      document.body.appendChild(el);
+    }
+    const e = GM_getValue(G.estado, null);
+    const token = GM_getValue(G.token, '');
+    const ok = token && e && e.ok;
+    el.style.background = !token ? '#fff1c2' : ok ? '#e3f4e8' : e ? '#f8d0cc' : '#eef3f9';
+    el.style.color = !token ? '#8a6100' : ok ? '#1e6b3a' : e ? '#8c1d12' : '#0b3d78';
+    const hace = e ? Math.max(0, Math.round((Date.now() - e.ts) / 60000)) : 0;
+    el.textContent = !token ? '☎ Llamadas: falta el token (menú de Tampermonkey)'
+      : !e ? '☎ Llamadas: enviando…'
+      : `☎ ${e.ok ? '✓' : '⚠'} ${e.texto}${hace ? ` · hace ${hace} min` : ''}`;
+  }
+
+  async function enviarEstaPagina(forzar = false) {
+    guardarEstado({ ok: true, texto: 'enviando…' });
+    try {
+      await sincronizar(document, forzar);
+    } catch (e) {
+      guardarEstado({ ok: false, texto: e.message });
+    }
+  }
+
+  // ═════════════════════════════════════════════
+  // Registro de llamadas (bitácora)
+  // Al dar Continuar la llamada se guarda en Tampermonkey y se envía cuando carga
+  // la página siguiente: si esa página es otra vez el formulario con un error de
+  // la intranet, se descarta (la llamada no se guardó allá). Lo que no se pueda
+  // enviar se reintenta cada minuto en cualquier pestaña de la intranet.
+  // ═════════════════════════════════════════════
+  const leerPendientes = () => { const p = GM_getValue(G.pendientes, []); return Array.isArray(p) ? p : []; };
+
+  function encolarLlamada(l) {
+    const p = leerPendientes().filter((x) => x.id !== l.id);
+    p.push({ ...l, encolada: Date.now() });
+    GM_setValue(G.pendientes, p.slice(-200));
+  }
+
+  function hayErrorDeFormulario() {
+    return [...document.querySelectorAll('.messages.error, .messages--error, .alert-danger, .error-message')]
+      .some((e) => limpio(e.textContent).length > 0);
+  }
+
+  let enviandoPendientes = false;
+  async function enviarPendientes() {
+    if (enviandoPendientes || !GM_getValue(G.token, '')) return;
+    enviandoPendientes = true;
+    try {
+      for (const l of leerPendientes()) {
+        if (Date.now() - l.encolada < 3000) continue;
+        try {
+          const { encolada, ...llamada } = l; // eslint-disable-line no-unused-vars
+          await enviar({ accion: 'llamada', llamada });
+          GM_setValue(G.pendientes, leerPendientes().filter((x) => x.id !== l.id));
+        } catch (e) {
+          // Rechazo definitivo (datos inválidos, token revocado): no se reintenta para siempre
+          if (e.definitivo || Date.now() - l.encolada > 7 * 864e5) {
+            GM_setValue(G.pendientes, leerPendientes().filter((x) => x.id !== l.id));
+          }
+          if (!e.definitivo) break; // sin conexión: se intenta más tarde
+        }
+      }
+    } finally {
+      enviandoPendientes = false;
+    }
+  }
+
+  // Al volver al mismo formulario con un error de la intranet, la llamada no se guardó:
+  // se descarta lo encolado para esta OTST en los últimos 2 minutos.
+  function descartarSiFallo() {
+    if (!ES_LLAMADA || !hayErrorDeFormulario()) return;
+    const otst = otstActual();
+    GM_setValue(G.pendientes, leerPendientes().filter((x) => !(x.otst === otst && Date.now() - x.encolada < 2 * 60000)));
+  }
+
+  // Aviso flotante de la llamada agrupada en curso (en cualquier página de la intranet)
+  function pintarAvisoGrupo() {
+    const g = GM_getValue(G.grupo, null);
+    const viejo = !g || Date.now() - g.ts > 12 * 3600e3;
+    const faltan = viejo ? [] : (g.faltan || []).filter((o) => o !== (ES_LLAMADA ? otstActual() : ''));
+    let el = document.getElementById('hll-grupo');
+    if (!faltan.length) { if (el) el.remove(); if (viejo && g) GM_setValue(G.grupo, null); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'hll-grupo';
+      el.style.cssText = 'position:fixed;left:14px;bottom:14px;z-index:2147483000;padding:9px 12px;border-radius:10px;'
+        + 'font:12.5px Arial,sans-serif;background:#f8f4ff;color:#4a2a85;border:1px solid #c9b8ea;border-left:4px solid #6b3fb5;'
+        + 'box-shadow:0 2px 10px rgba(0,0,0,.15);max-width:420px';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '';
+    const b = document.createElement('b'); b.textContent = `🔗 Llamada agrupada${g.cliente ? ' — ' + g.cliente : ''}: `;
+    el.append(b, `faltan ${faltan.length} por registrar: `);
+    faltan.forEach((o, i) => {
+      const a = document.createElement('a'); a.href = `/stecnico/item/${o}/diagnosiscall`; a.textContent = o; a.style.fontWeight = '700';
+      el.append(i ? ', ' : '', a);
+    });
+    const x = document.createElement('a'); x.href = '#'; x.textContent = ' ✕'; x.title = 'Ocultar (no vuelve a aparecer para este grupo)';
+    x.style.cssText = 'color:#8a97a6;text-decoration:none;margin-left:6px';
+    x.addEventListener('click', (e) => { e.preventDefault(); GM_setValue(G.grupo, null); el.remove(); });
+    el.append(x);
+  }
+
+  // ═════════════════════════════════════════════
+  // Formulario "Llamada de Seguimiento Diagnóstico" (/stecnico/item/N/diagnosiscall)
+  // ═════════════════════════════════════════════
+  const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+  const DIAS = ['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá', 'Do'];
+  const ESTADO_LLAMADA = /llamada seguimiento diagn/i;
+  const RE_ENCABEZADO = /Orden relacionada con las? OTST\s*([\d\s,y.]+?)\s*\.?\s*Se deja (?:el )?seguimiento en (?:la )?(?:OTST\s*)?(\d+)\.?/i;
+  const otstActual = () => (location.pathname.match(/item\/(\d+)/) || [])[1] || '';
+  const ordenar = (l) => [...new Set(l.map(String))].sort((a, b) => +a - +b);
+  const textoEncabezado = (otsts, seg) => `Orden relacionada con la OTST ${otsts.join(', ')}. Se deja seguimiento en ${seg}`;
+
+  function leerEncabezado(texto) {
+    const m = (texto || '').match(RE_ENCABEZADO);
+    if (!m) return null;
+    return { otsts: ordenar((m[1].match(/\d{3,}/g) || []).concat(m[2])), seguimiento: m[2] };
+  }
+
+  function disparar(el) {
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function selectAccion() {
+    for (const s of document.querySelectorAll('select')) {
+      if ([...s.options].some((o) => /contactar nuevamente/i.test(o.text))) return s;
+    }
+    return null;
+  }
+  const opcion = (select, re) => [...select.options].find((o) => re.test(o.text)) || null;
+  const esEfectivo = (select) => /contacto con el cliente fue efectivo/i.test(select.options[select.selectedIndex]?.text || '');
+
+  // Primer <input> de texto que aparece DESPUÉS de una etiqueta con ese texto
+  function inputTrasEtiqueta(texto) {
+    const t = norm(texto);
+    const etiquetas = [...document.querySelectorAll('label, b, strong, span, div, td, th')].filter(
+      (el) => el.children.length <= 2 && norm(el.textContent).replace(/[:*\s]+$/, '').startsWith(t) && norm(el.textContent).length < t.length + 8
+    );
+    for (const et of etiquetas) {
+      for (const inp of document.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=checkbox]):not([type=radio])')) {
+        if (et.compareDocumentPosition(inp) & Node.DOCUMENT_POSITION_FOLLOWING) return inp;
+      }
+    }
+    return null;
+  }
+
+  function botonContinuar() {
+    for (const b of document.querySelectorAll('button, input[type=submit], input[type=button], a.button')) {
+      if (/^continuar$/i.test((b.value || b.textContent || '').trim())) return b;
+    }
+    return null;
+  }
+
+  const areaObservacion = (select) => (select.form || document).querySelector('textarea');
+
+  function elegirAccion(select, efectivo) {
+    const op = opcion(select, efectivo ? /contacto con el cliente fue efectivo/i : /contactar nuevamente/i);
+    if (!op || select.value === op.value) return;
+    select.value = op.value;
+    try { const $ = window.jQuery; if ($) $(select).trigger('change'); } catch (e) { /* no crítico */ }
+    disparar(select);
+  }
+
+  function estilos() {
+    if (document.getElementById('hll-ls-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'hll-ls-styles';
+    s.textContent = `
+      #ui-datepicker-div { display: none !important; }
+      #hll-fila { display: flex; align-items: flex-start; gap: 18px; }
+      #hll-fila > .hll-bloque { flex: 1 1 auto; min-width: 0; }
+      #hll-fila > #hll-cal { flex: 0 0 296px; }
+      #hll-fila textarea { min-height: 190px; box-sizing: border-box; }
+      #hll-cal { margin: 0 0 14px; padding: 8px 10px; width: 296px; box-sizing: border-box; background: #fff;
+        border: 1px solid #cfd8e3; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,40,90,.12); font-family: Arial, sans-serif; }
+      #hll-cal .c-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+      #hll-cal .c-titulo { font-weight: 700; color: #0b3d78; font-size: 13px; }
+      #hll-cal .c-nav { border: 0; background: #eef3f9; color: #0b3d78; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; font-size: 13px; line-height: 1; }
+      #hll-cal .c-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+      #hll-cal .c-dow { text-align: center; font-size: 10px; font-weight: 700; color: #6b7a8c; padding: 1px 0; }
+      #hll-cal .c-dia { border: 0; background: #f6f8fb; border-radius: 6px; height: 19px; line-height: 1; padding: 0; font-size: 11px; color: #1f2d3d; cursor: pointer; }
+      #hll-cal .c-dia:hover { background: #d8e6f5; }
+      #hll-cal .c-dia.finde { color: #a5b0bd; background: #fafbfc; }
+      #hll-cal .c-dia.festivo { color: #c0392b; background: #fafbfc; text-decoration: line-through; }
+      #hll-cal .c-dia.libre { background: #e3f4e8; }
+      #hll-cal .c-dia.medio { background: #fff1c2; }
+      #hll-cal .c-dia.lleno { background: #f8d0cc; color: #8c1d12; }
+      #hll-cal .c-dia.hoy { outline: 2px solid #f0c040; outline-offset: -2px; }
+      #hll-cal .c-dia.pasado { opacity: .35; cursor: not-allowed; background: #f6f8fb; color: #1f2d3d; }
+      #hll-cal .c-dia.sel { background: #0b6fd6; color: #fff; font-weight: 700; }
+      #hll-cal .c-vacio { visibility: hidden; }
+      #hll-cal .c-atajos { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 6px; }
+      #hll-cal .c-atajo { border: 1px solid #b7cbe3; background: #fff; color: #0b3d78; border-radius: 12px; padding: 2px 6px; font-size: 10.5px; cursor: pointer; white-space: nowrap; }
+      #hll-cal .c-atajo.sug { background: #e3f4e8; border-color: #8fc9a1; color: #1e6b3a; font-weight: 700; }
+      #hll-cal .c-resumen { font-size: 11px; color: #6b7a8c; margin-top: 6px; line-height: 1.35; }
+      #hll-cal .c-resumen.alerta { color: #c0392b; font-weight: 700; }
+      #hll-msgs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0 8px; font-family: Arial, sans-serif; }
+      #hll-msgs .m-tit { font-size: 12px; color: #6b7a8c; margin-right: 2px; }
+      #hll-msgs .m-chip { display: inline-flex; align-items: center; border: 1px solid #b7cbe3; background: #f3f8fd; border-radius: 14px; overflow: hidden; }
+      #hll-msgs .m-chip.equipo { border-color: #8fc9a1; background: #eef8f1; }
+      #hll-msgs .m-chip button { border: 0; background: transparent; cursor: pointer; font-size: 12px; color: #0b3d78; padding: 5px 10px; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hll-msgs .m-chip .m-x { padding: 5px 8px 5px 4px; color: #8a97a6; }
+      #hll-msgs .m-guardar { border: 1px dashed #8fb0d6; background: #fff; color: #0b3d78; border-radius: 14px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+      .hll-aviso { margin: 4px 0 10px; padding: 8px 12px; border-radius: 8px; font-family: Arial, sans-serif; font-size: 13px; }
+      .hll-aviso small { color: #6b7a8c; }
+      #hll-prio { border: 1px solid #f1b8b0; border-left: 4px solid #c0392b; background: #fff8f6; color: #a52a1a; }
+      #hll-tomada { border: 1px solid #f0d58a; border-left: 4px solid #d69e00; background: #fffaeb; color: #7a5a00; }
+      #hll-grupo-form { margin: 4px 0 10px; padding: 9px 12px; border: 1px solid #c9b8ea; border-left: 4px solid #6b3fb5; border-radius: 8px; background: #f8f4ff; font-family: Arial, sans-serif; font-size: 12.5px; color: #1f2d3d; }
+      #hll-grupo-form .g-tit { font-weight: 700; color: #4a2a85; margin-bottom: 5px; }
+      #hll-grupo-form .g-estado { margin-bottom: 6px; }
+      #hll-grupo-form .g-otsts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 7px; }
+      #hll-grupo-form label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+      #hll-grupo-form label small { color: #6b7a8c; }
+      #hll-grupo-form label.g-seg { font-weight: 700; color: #4a2a85; }
+      #hll-grupo-form .g-acciones { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+      #hll-grupo-form button { border: 1px solid #6b3fb5; background: #6b3fb5; color: #fff; border-radius: 14px; padding: 4px 12px; font-size: 12px; cursor: pointer; font-weight: 700; }
+      #hll-grupo-form .g-nota { color: #6b7a8c; font-size: 11.5px; }
+      #hll-grupo-form .g-ok { color: #2f855a; font-weight: 700; }
+      #hll-grupo-form .g-gar { background: #fff1c2; color: #8a6100; border-radius: 8px; padding: 0 6px; font-size: 11px; }
+      #hll-overlay { position: fixed; inset: 0; background: rgba(15,25,40,.55); z-index: 2147483000; display: flex; align-items: center; justify-content: center; }
+      #hll-modal { background: #fff; border-radius: 12px; padding: 24px 26px; max-width: 460px; width: calc(100% - 32px); box-shadow: 0 10px 40px rgba(0,0,0,.35); font-family: Arial, sans-serif; }
+      #hll-modal h3 { margin: 0 0 10px; font-size: 18px; color: #0b3d78; }
+      #hll-modal p { margin: 0 0 18px; font-size: 15px; color: #1f2d3d; line-height: 1.45; }
+      #hll-modal ul { list-style: none; margin: 0 0 16px; padding: 0; font-size: 14px; }
+      #hll-modal ul li { padding: 6px 0; border-bottom: 1px solid #eef2f7; }
+      #hll-modal ul li .e { float: right; font-size: 12.5px; color: #6b7a8c; }
+      #hll-modal ul li .e.ok { color: #2f855a; font-weight: 700; }
+      #hll-modal ul li .e.mal { color: #c0392b; font-weight: 700; float: none; display: block; }
+      #hll-modal .btns { display: flex; justify-content: flex-end; gap: 10px; }
+      #hll-modal button { border-radius: 8px; padding: 9px 16px; font-size: 14px; cursor: pointer; border: 1px solid #b7cbe3; background: #fff; color: #0b3d78; }
+      #hll-modal button.ok { background: #0b6fd6; border-color: #0b6fd6; color: #fff; font-weight: 700; }
+    `;
+    document.head.appendChild(s);
+  }
+
+  // ── Contexto desde la app (cola, carga, prioritaria, reserva, mensajes, grupo) ──
+  let ctx = null;          // respuesta de 'contexto' (null si no hay token o falló)
+  let plan = null;         // { carga, cupoEq, sugerida }
+
+  // Carga de seguimiento por día hábil (mismo cálculo que la agenda de la app)
+  function calcularCarga(c) {
+    const ahora = new Date();
+    const hoyK = clave(ahora);
+    const inicio = esHabil(ahora) ? d0(ahora) : sigHabil(ahora);
+    const inicioK = clave(inicio);
+    const cupoEq = Math.max(1, (c.config && c.config.cupo_seguimiento_equipo) || 10);
+    const carga = {};
+    const atendidaHoy = (f) => f.atendida_en && clave(new Date(f.atendida_en)) === hoyK;
+    const segHechas = c.cola.filter((f) => atendidaHoy(f) && f.contacto_anterior).length;
+    if (inicioK === hoyK && segHechas) carga[hoyK] = Math.min(cupoEq, segHechas);
+    c.cola.filter((f) => !f.salio_en && f.proximo_contacto)
+      .sort((a, b) => a.proximo_contacto.localeCompare(b.proximo_contacto) || (b.dias_en_estado || 0) - (a.dias_en_estado || 0))
+      .forEach((f) => {
+        let d = f.proximo_contacto <= inicioK ? inicio : deClave(f.proximo_contacto);
+        if (!esHabil(d)) d = sigHabil(d);
+        while ((carga[clave(d)] || 0) >= cupoEq) d = sigHabil(d);
+        carga[clave(d)] = (carga[clave(d)] || 0) + 1;
+      });
+    let s = sigHabil(ahora);
+    for (let i = 0; i < 250 && (carga[clave(s)] || 0) >= cupoEq; i++) s = sigHabil(s);
+    return { carga, cupoEq, sugerida: s };
+  }
+  const cargaDe = (f) => (plan ? plan.carga[clave(f)] || 0 : 0);
+  const fechaSugerida = () => (plan ? plan.sugerida : sumarHabiles(new Date(), 2));
+
+  // ── Calendario propio, al lado del cuadro de Observación ──
+  const cal = { vista: null, input: null };
+
+  function actualizarInput(input, fecha) {
+    input.value = formatear(fecha);
+    disparar(input);
+    try {
+      const $ = window.jQuery;
+      if ($ && $.fn && $.fn.datepicker && $(input).data('datepicker')) $(input).datepicker('setDate', input.value);
+    } catch (e) { /* no crítico */ }
+    dibujarCalendario();
+  }
+
+  function dibujarCalendario() {
+    const el = document.getElementById('hll-cal');
+    if (!el || !cal.input) return;
+    const input = cal.input;
+    const sel = parsear(input.value);
+    const hoy = d0(new Date());
+    if (!cal.vista) cal.vista = new Date((sel || hoy).getFullYear(), (sel || hoy).getMonth(), 1);
+    const v = cal.vista;
+    el.innerHTML = '';
+    const mk = (txt, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = txt; b.addEventListener('click', fn); return b; };
+    const head = document.createElement('div'); head.className = 'c-head';
+    const titulo = document.createElement('span'); titulo.className = 'c-titulo'; titulo.textContent = `${MESES[v.getMonth()]} ${v.getFullYear()}`;
+    head.append(
+      mk('‹', () => { cal.vista = new Date(v.getFullYear(), v.getMonth() - 1, 1); dibujarCalendario(); }, 'c-nav'),
+      titulo,
+      mk('›', () => { cal.vista = new Date(v.getFullYear(), v.getMonth() + 1, 1); dibujarCalendario(); }, 'c-nav'));
+    el.appendChild(head);
+
+    const grid = document.createElement('div'); grid.className = 'c-grid';
+    DIAS.forEach((d) => { const e = document.createElement('div'); e.className = 'c-dow'; e.textContent = d; grid.appendChild(e); });
+    const offset = (new Date(v.getFullYear(), v.getMonth(), 1).getDay() + 6) % 7;
+    for (let i = 0; i < offset; i++) { const e = document.createElement('span'); e.className = 'c-vacio'; grid.appendChild(e); }
+    const total = new Date(v.getFullYear(), v.getMonth() + 1, 0).getDate();
+    for (let d = 1; d <= total; d++) {
+      const f = new Date(v.getFullYear(), v.getMonth(), d);
+      const b = document.createElement('button'); b.type = 'button';
+      let carga = '';
+      if (esFestivo(f) && !esFinDeSemana(f)) { carga = ' festivo'; b.title = 'Festivo'; }
+      else if (plan && f > hoy && esHabil(f)) {
+        const n = cargaDe(f);
+        carga = n >= plan.cupoEq ? ' lleno' : n >= plan.cupoEq * 0.7 ? ' medio' : ' libre';
+        b.title = `${n}/${plan.cupoEq} seguimientos planeados (equipo)`;
+      }
+      b.className = 'c-dia' + (esFinDeSemana(f) ? ' finde' : '') + carga + (mismoDia(f, hoy) ? ' hoy' : '') + (f < hoy ? ' pasado' : '') + (mismoDia(f, sel) ? ' sel' : '');
+      b.textContent = d;
+      if (f >= hoy) b.addEventListener('click', () => actualizarInput(input, f));
+      grid.appendChild(b);
+    }
+    el.appendChild(grid);
+
+    const atajos = document.createElement('div'); atajos.className = 'c-atajos';
+    const lista = [['Mañana', () => sumarHabiles(hoy, 1)], ['2 días háb.', () => sumarHabiles(hoy, 2)],
+      ['1 semana', () => { const r = new Date(hoy); r.setDate(r.getDate() + 7); return ajustarHabil(r); }],
+      ['2 semanas', () => { const r = new Date(hoy); r.setDate(r.getDate() + 14); return ajustarHabil(r); }]];
+    if (plan) { const s = plan.sugerida; lista.unshift([`Sugerida ${pad(s.getDate())}/${pad(s.getMonth() + 1)}`, () => s, 'sug']); }
+    lista.forEach(([txt, fn, cls]) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'c-atajo' + (cls ? ' ' + cls : ''); b.textContent = txt;
+      if (cls === 'sug') b.title = 'Primer día hábil con cupo de seguimiento libre (equipo)';
+      b.addEventListener('click', () => { const f = fn(); cal.vista = new Date(f.getFullYear(), f.getMonth(), 1); actualizarInput(input, f); });
+      atajos.appendChild(b);
+    });
+    el.appendChild(atajos);
+
+    const res = document.createElement('div'); res.className = 'c-resumen';
+    if (!sel) res.textContent = 'Elige una fecha';
+    else if (!esHabil(sel)) { res.className += ' alerta'; res.textContent = `⚠ ${formatear(sel)} no es día hábil${esFestivo(sel) ? ' (festivo)' : ''}.`; }
+    else if (plan && cargaDe(sel) >= plan.cupoEq) {
+      res.className += ' alerta';
+      res.textContent = `⚠ El ${formatear(sel)} ya tiene ${cargaDe(sel)}/${plan.cupoEq} seguimientos. Sugerida: ${formatear(plan.sugerida)}.`;
+    } else if (plan) res.textContent = `${formatear(sel)}: ${cargaDe(sel)}/${plan.cupoEq} seguimientos del equipo. Verde = con cupo, amarillo = casi lleno, rojo = lleno.`;
+    else res.textContent = GM_getValue(G.token, '') ? 'Cargando la carga del equipo…' : 'Configura el token de llamadas para ver la carga del equipo.';
+    el.appendChild(res);
+  }
+
+  const visible = (el) => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+
+  function ubicarCalendario(el, input, select) {
+    const area = areaObservacion(select);
+    if (!area) { if (el.previousElementSibling !== input) input.insertAdjacentElement('afterend', el); return; }
+    let fila = document.getElementById('hll-fila');
+    if (!fila) {
+      const bloque = area.closest('.resizable-textarea, .form-textarea-wrapper') || area.parentElement;
+      fila = document.createElement('div'); fila.id = 'hll-fila';
+      bloque.parentNode.insertBefore(fila, bloque);
+      fila.appendChild(bloque);
+      bloque.classList.add('hll-bloque');
+    }
+    if (el.parentNode !== fila) fila.appendChild(el);
+  }
+
+  function asegurarCalendario(select) {
+    const input = inputTrasEtiqueta('Fecha para Próximo Contacto');
+    const existente = document.getElementById('hll-cal');
+    const mostrar = input && visible(input) && /contactar nuevamente/i.test(select.options[select.selectedIndex]?.text || '');
+    if (!mostrar) { if (existente && existente.style.display !== 'none') existente.style.display = 'none'; return; }
+    cal.input = input;
+    // Fecha sugerida solo si está vacía (nunca pisa lo ya elegido); con el plan del equipo si ya llegó
+    if (!input.value.trim() && !input.dataset.hllSugerida) {
+      input.dataset.hllSugerida = plan ? 'equipo' : 'local';
+      input.value = formatear(fechaSugerida());
+      disparar(input);
+    } else if (plan && input.dataset.hllSugerida === 'local') {
+      input.dataset.hllSugerida = 'equipo';
+      input.value = formatear(plan.sugerida);
+      disparar(input);
+    }
+    let el = existente;
+    if (!el) {
+      el = document.createElement('div'); el.id = 'hll-cal';
+      input.addEventListener('input', () => { cal.vista = null; dibujarCalendario(); });
+      input.addEventListener('change', () => { cal.vista = null; dibujarCalendario(); });
+    }
+    ubicarCalendario(el, input, select);
+    if (el.style.display) el.style.display = '';
+    const estado = plan ? 'equipo' : 'local';
+    if (el.dataset.dibujado !== estado) { el.dataset.dibujado = estado; cal.vista = null; dibujarCalendario(); }
+  }
+
+  // ── Mensajes rápidos (equipo + personales, guardados en la app) ──
+  function cargarMensaje(area, texto) {
+    area.value = area.value.trim() ? `${area.value.replace(/\s+$/, '')} ${texto}` : texto;
+    disparar(area);
+    area.focus();
+  }
+
+  function dibujarMensajes(barra, area) {
+    barra.innerHTML = '';
+    const tit = document.createElement('span'); tit.className = 'm-tit'; tit.textContent = 'Mensajes rápidos:';
+    barra.appendChild(tit);
+    if (!ctx) {
+      const s = document.createElement('span'); s.className = 'm-tit';
+      s.textContent = GM_getValue(G.token, '') ? 'cargando…' : '(configura el token de llamadas)';
+      barra.appendChild(s);
+      return;
+    }
+    ctx.mensajes.forEach((m) => {
+      const chip = document.createElement('span'); chip.className = 'm-chip' + (m.equipo ? ' equipo' : '');
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = m.texto;
+      b.title = `${m.equipo ? 'Del equipo' : 'Tuyo'}: ${m.texto}`;
+      b.addEventListener('click', () => cargarMensaje(area, m.texto));
+      const x = document.createElement('button'); x.type = 'button'; x.className = 'm-x'; x.textContent = '×';
+      x.title = m.equipo ? 'Eliminar este mensaje del equipo (para todos)' : 'Eliminar este mensaje';
+      x.addEventListener('click', async () => {
+        if (m.equipo && !confirm('Este mensaje es del equipo: se borra para todos. ¿Eliminarlo?')) return;
+        try { await enviar({ accion: 'mensaje_borrar', id: m.id }); ctx.mensajes = ctx.mensajes.filter((y) => y.id !== m.id); }
+        catch (e) { alert(`No se pudo eliminar: ${e.message}`); }
+        dibujarMensajes(barra, area);
+      });
+      chip.append(b, x); barra.appendChild(chip);
+    });
+    const guardar = (equipo) => {
+      const g = document.createElement('button'); g.type = 'button'; g.className = 'm-guardar';
+      g.textContent = equipo ? '+ Guardar para el equipo' : '+ Guardar el texto actual';
+      g.title = equipo ? 'Guarda lo escrito en Observación como mensaje rápido para todo el equipo' : 'Guarda lo escrito en Observación como mensaje rápido tuyo';
+      g.addEventListener('click', async () => {
+        const txt = area.value.replace(RE_ENCABEZADO, '').replace(/\s+/g, ' ').trim();
+        if (!txt) { g.textContent = 'Escribe primero algo en Observación'; setTimeout(() => dibujarMensajes(barra, area), 1800); return; }
+        if (ctx.mensajes.some((m) => m.texto === txt)) return;
+        try { const r = await enviar({ accion: 'mensaje_guardar', texto: txt, equipo }); ctx.mensajes.push({ id: r.id, texto: txt, equipo }); }
+        catch (e) { alert(`No se pudo guardar: ${e.message}`); }
+        dibujarMensajes(barra, area);
+      });
+      return g;
+    };
+    barra.append(guardar(false), guardar(true));
+  }
+
+  function asegurarMensajes(select) {
+    const area = areaObservacion(select);
+    if (!area) return;
+    let barra = document.getElementById('hll-msgs');
+    if (!barra) {
+      barra = document.createElement('div'); barra.id = 'hll-msgs';
+      const ref = document.getElementById('hll-fila') || area.closest('.resizable-textarea, .form-textarea-wrapper') || area.parentElement;
+      ref.parentNode.insertBefore(barra, ref);
+    }
+    const estado = ctx ? 'ctx' : 'sin';
+    if (barra.dataset.estado !== estado) { barra.dataset.estado = estado; dibujarMensajes(barra, area); }
+  }
+
+  // ── Avisos: prioritaria y reserva de otra persona ──
+  function insertarAntesDelFormulario(el, select) {
+    const area = areaObservacion(select);
+    const ref = document.getElementById('hll-grupo-form') || document.getElementById('hll-msgs') || document.getElementById('hll-fila')
+      || (area && (area.closest('.resizable-textarea, .form-textarea-wrapper') || area.parentElement));
+    if (ref) ref.parentNode.insertBefore(el, ref);
+  }
+
+  function asegurarAvisos(select) {
+    if (!ctx) return;
+    const hora = (iso) => { const f = new Date(iso); return `${pad(f.getHours())}:${pad(f.getMinutes())}`; };
+    if (ctx.prioritaria && !document.getElementById('hll-prio')) {
+      const p = ctx.prioritaria;
+      const caja = document.createElement('div'); caja.id = 'hll-prio'; caja.className = 'hll-aviso';
+      const b = document.createElement('b'); b.textContent = '🚩 OTST prioritaria';
+      const s = document.createElement('small'); s.textContent = ` (marcada por ${p.por || '¿?'})`;
+      caja.append(b, ` — ${p.nota || 'atención especial'}`, s);
+      insertarAntesDelFormulario(caja, select);
+    }
+    if (ctx.tomada && !ctx.tomada.mia && !document.getElementById('hll-tomada')) {
+      const caja = document.createElement('div'); caja.id = 'hll-tomada'; caja.className = 'hll-aviso';
+      const b = document.createElement('b'); b.textContent = `⚠ ${ctx.tomada.nombre || 'Otra persona'} está llamando a este cliente`;
+      caja.append(b, ` (lo reservó a las ${hora(ctx.tomada.tomada_en)}). Revisa con esa persona antes de registrar.`);
+      insertarAntesDelFormulario(caja, select);
+    }
+  }
+
+  // ── Llamada agrupada por cliente ──
+  // Con una llamada se atienden todas las OTST del cliente (mismo tipo de garantía):
+  // todas llevan el mismo texto ("Orden relacionada con la OTST x1, …, xn. Se deja
+  // seguimiento en xn" + lo que se habló), la mayor (xn) se reprograma y las demás se
+  // cierran con «contacto efectivo». Opción A (por defecto): se registra una por una;
+  // al abrir cada OTST del grupo el texto, el contacto y la acción ya vienen listos.
+  // Opción B (si la activas en la app → Mi cupo): al registrar la xn, las demás se
+  // cierran solas por detrás.
+  const filaDe = (o) => (ctx ? ctx.cola.find((f) => f.otst === o) || null : null);
+  const registradasHoy = () => new Set([...(ctx ? ctx.registradasHoy : []), ...leerPendientes().map((x) => x.otst)]);
+
+  // Grupo en curso hoy (de tus llamadas registradas) que incluye esta OTST
+  function grupoEnCurso(otst) {
+    if (!ctx) return null;
+    const entradas = ctx.bitacora.filter((e) => e.grupo && (e.otsts_grupo || []).includes(otst));
+    if (!entradas.length) return null;
+    const ultima = entradas[entradas.length - 1];
+    const delGrupo = ctx.bitacora.filter((e) => e.grupo === ultima.grupo);
+    const seg = delGrupo.find((e) => e.otst === ultima.grupo);
+    return {
+      seguimiento: ultima.grupo, otsts: ordenar(ultima.otsts_grupo), texto: ultima.observacion, contacto: ultima.contacto,
+      fecha: seg ? seg.proximo_contacto : null, hechas: ordenar(delGrupo.map((e) => e.otst)),
+    };
+  }
+
+  // OTST del cliente aún por atender (mismo tipo de garantía que esta)
+  function otstsDelCliente(otst) {
+    const yo = filaDe(otst);
+    if (!yo) return null;
+    const hoyK = clave(new Date());
+    const filas = ctx.cola.filter((f) => f.cliente === yo.cliente && !!f.garantia === !!yo.garantia && !f.salio_en
+      && (f.otst === otst || !(f.atendida_en && clave(new Date(f.atendida_en)) === hoyK)));
+    return { cliente: yo.cliente, filas };
+  }
+
+  function ponerEncabezado(area, texto) {
+    const lineas = area.value.split(/\r?\n/);
+    const resto = RE_ENCABEZADO.test(lineas[0] || '') ? lineas.slice(1) : lineas;
+    area.value = resto.join('').trim() ? [texto, ...resto].join('\n') : texto + '\n';
+    disparar(area);
+    area.focus();
+    area.setSelectionRange(area.value.length, area.value.length);
+  }
+
+  function prellenarGrupo(select, area, g, otst) {
+    if (!area.value.trim() && g.texto) { area.value = g.texto; disparar(area); }
+    const contacto = inputTrasEtiqueta('Nombre Contacto');
+    if (contacto && !contacto.value.trim() && g.contacto) { contacto.value = g.contacto; disparar(contacto); }
+    const esSeg = otst === g.seguimiento;
+    elegirAccion(select, !esSeg);
+    if (esSeg && g.fecha) {
+      setTimeout(() => {
+        const input = inputTrasEtiqueta('Fecha para Próximo Contacto');
+        if (!input) return;
+        input.dataset.hllSugerida = 'grupo';
+        input.value = formatear(deClave(g.fecha));
+        disparar(input);
+        asegurarCalendario(select);
+      }, 200);
+    }
+  }
+
+  function asegurarGrupo(select) {
+    const area = areaObservacion(select);
+    if (!ctx || !area || document.getElementById('hll-grupo-form')) return;
+    const otst = otstActual();
+    const g = grupoEnCurso(otst);
+    const regs = registradasHoy();
+    const pendiente = g && !regs.has(otst) ? g : null;
+    const cli = otstsDelCliente(otst);
+    if (!pendiente && (!cli || cli.filas.length < 2)) return;
+
+    const info = {};
+    (cli ? cli.filas : []).forEach((f) => { info[f.otst] = f; });
+    const todas = ordenar([...Object.keys(info), ...(pendiente ? pendiente.otsts : []), otst]);
+    const marcadas = new Set(pendiente ? pendiente.otsts : todas);
+    const hoyK = clave(new Date());
+
+    const caja = document.createElement('div'); caja.id = 'hll-grupo-form';
+    const ref = document.getElementById('hll-msgs') || document.getElementById('hll-fila') || area.closest('.resizable-textarea, .form-textarea-wrapper') || area.parentElement;
+    ref.parentNode.insertBefore(caja, ref);
+    if (pendiente) prellenarGrupo(select, area, pendiente, otst);
+
+    const tit = document.createElement('div'); tit.className = 'g-tit';
+    tit.textContent = `🔗 Llamada agrupada${cli && cli.cliente ? ' — ' + cli.cliente : ''}: ${todas.length} OTST`;
+    const est = document.createElement('div'); est.className = 'g-estado';
+    const cont = document.createElement('div'); cont.className = 'g-otsts';
+    const checks = todas.map((o) => {
+      const l = document.createElement('label');
+      const c = document.createElement('input'); c.type = 'checkbox'; c.value = o; c.checked = marcadas.has(o);
+      if (o === otst) { c.disabled = true; c.checked = true; }
+      const f = info[o];
+      const det = regs.has(o) && o !== otst ? '✅ registrada hoy'
+        : !f ? '' : f.proximo_contacto ? (f.proximo_contacto < hoyK ? 'vencida ' : '') + f.proximo_contacto.split('-').reverse().slice(0, 2).join('/') : 'sin contacto';
+      const sm = document.createElement('small'); sm.textContent = o === otst ? `(esta${det ? ', ' + det : ''})` : det ? `(${det})` : '';
+      l.append(c, ` ${o} `, sm);
+      if (f && f.garantia) { const gt = document.createElement('span'); gt.className = 'g-gar'; gt.textContent = '🛡 garantía'; l.append(' ', gt); }
+      c.addEventListener('change', pintarGrupo);
+      cont.appendChild(l);
+      return { c, l };
+    });
+    const acc = document.createElement('div'); acc.className = 'g-acciones';
+    const b = document.createElement('button'); b.type = 'button';
+    const nota = document.createElement('span'); nota.className = 'g-nota';
+    acc.append(b, nota);
+    caja.append(tit, est, cont, acc);
+
+    const auto = !!(ctx.config && ctx.config.auto_cierre_grupo);
+    const elegidas = () => ordenar(checks.filter((x) => x.c.checked).map((x) => x.c.value));
+    function pintarGrupo() {
+      const sel = elegidas();
+      const seg = sel[sel.length - 1];
+      checks.forEach((x) => x.l.classList.toggle('g-seg', x.c.value === seg));
+      const accion = otst === seg ? 'aquí queda el seguimiento (Contactar nuevamente + fecha)' : 'se cierra con «contacto efectivo»';
+      est.textContent = '';
+      if (pendiente) {
+        const faltan = sel.filter((o) => !regs.has(o) && o !== otst);
+        const ok = document.createElement('span'); ok.className = 'g-ok';
+        ok.textContent = `Grupo iniciado hoy (${pendiente.hechas.length} de ${pendiente.otsts.length} registradas). `;
+        est.append(ok, `Esta OTST: ${accion}. ${faltan.length ? 'Después faltan: ' + faltan.join(', ') + '.' : 'Es la última del grupo.'}`);
+      } else {
+        est.textContent = `¿Con esta llamada atiendes varias? Marca cuáles. El seguimiento queda en la mayor (${seg}); las demás se cierran. Esta OTST: ${accion}.`;
+      }
+      b.textContent = pendiente ? 'Actualizar encabezado' : 'Insertar encabezado';
+      const otras = sel.filter((o) => o !== otst);
+      const porAbrir = otras.filter((o) => !regs.has(o));
+      nota.textContent = `«${textoEncabezado(sel, seg)}» — escribe debajo lo que se habló. `
+        + (sel.length < 2 ? 'Se registra solo esta.'
+          : auto && otst === seg ? `Al dar Continuar, las demás (${otras.join(', ')}) se cierran solas con «contacto efectivo» y este mismo texto.`
+          : porAbrir.length ? `Al dar Continuar, abre las demás (${porAbrir.join(', ')}): llegan con el texto listo.`
+          : 'Es la última del grupo: al dar Continuar queda completo.');
+    }
+    b.addEventListener('click', () => {
+      const sel = elegidas();
+      const seg = sel[sel.length - 1];
+      ponerEncabezado(area, textoEncabezado(sel, seg));
+      elegirAccion(select, otst !== seg);
+    });
+    pintarGrupo();
+  }
+
+  // ── Modales ──
+  function abrirModal(construir) {
+    const ov = document.createElement('div'); ov.id = 'hll-overlay';
+    const m = document.createElement('div'); m.id = 'hll-modal';
+    ov.appendChild(m); document.body.appendChild(ov);
+    let bloqueado = false;
+    const cerrar = () => { if (bloqueado) return; document.removeEventListener('keydown', tecla, true); ov.remove(); };
+    const tecla = (e) => { if (e.key === 'Escape') { e.preventDefault(); cerrar(); } };
+    document.addEventListener('keydown', tecla, true);
+    ov.addEventListener('click', (e) => { if (e.target === ov) cerrar(); });
+    construir(m, cerrar, (v) => { bloqueado = v; });
+  }
+
+  function boton(texto, clase, fn) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = texto; if (clase) b.className = clase;
+    b.addEventListener('click', fn); return b;
+  }
+
+  function avisoModal(texto) {
+    abrirModal((m, cerrar) => {
+      const p = document.createElement('p'); p.textContent = texto;
+      const btns = document.createElement('div'); btns.className = 'btns';
+      const ok = boton('Entendido', 'ok', cerrar);
+      btns.append(ok); m.append(p, btns); ok.focus();
+    });
+  }
+
+  function modalConfirmar(nombre, alAceptar) {
+    abrirModal((m, cerrar) => {
+      const h = document.createElement('h3'); h.textContent = 'Cerrar la comunicación';
+      const p = document.createElement('p'); p.append('Se cerrará la comunicación con ');
+      const b = document.createElement('b'); b.textContent = nombre || 'esta persona'; p.append(b, '. ¿Estás seguro?');
+      const btns = document.createElement('div'); btns.className = 'btns';
+      const ok = boton('Sí, cerrar', 'ok', () => { cerrar(); alAceptar(); });
+      btns.append(boton('Cancelar', '', cerrar), ok);
+      m.append(h, p, btns); ok.focus();
+    });
+  }
+
+  // ── Opción B: cierre automático de las demás OTST del grupo ──
+  async function estadoOtst(o) {
+    const h = await (await fetch(`/stecnico/item/${o}`, { credentials: 'same-origin' })).text();
+    const d = new DOMParser().parseFromString(h, 'text/html');
+    const p = [...d.querySelectorAll('p')].find((x) => /^\s*Estado:/.test(x.textContent));
+    return p ? p.textContent.replace(/\s+/g, ' ').replace(/^\s*Estado:\s*/, '').replace(/\s*Tiempo Restante.*$/i, '').trim() : '';
+  }
+
+  // Envía el formulario de llamada de otra OTST con «contacto efectivo». Devuelve su nuevo estado.
+  async function cerrarOtst(o, texto, contacto) {
+    const url = `/stecnico/item/${o}/diagnosiscall`;
+    const doc = new DOMParser().parseFromString(await (await fetch(url, { credentials: 'same-origin' })).text(), 'text/html');
+    const ta = doc.querySelector('textarea');
+    const form = ta && ta.form;
+    const sel = form && [...form.querySelectorAll('select')].find((s) => [...s.options].some((x) => /contacto con el cliente fue efectivo/i.test(x.text)));
+    if (!form || !sel) {
+      const ya = await estadoOtst(o);
+      if (ya && !ESTADO_LLAMADA.test(ya)) return { est: ya, ya: true };
+      throw new Error('no se encontró el formulario de llamada');
+    }
+    const datos = new URLSearchParams();
+    for (const el of form.elements) {
+      if (!el.name || el.disabled || el.type === 'submit' || el.type === 'button') continue;
+      if ((el.type === 'checkbox' || el.type === 'radio') && !el.checked) continue;
+      datos.append(el.name, el.value);
+    }
+    datos.set(sel.name, [...sel.options].find((x) => /contacto con el cliente fue efectivo/i.test(x.text)).value);
+    datos.set(ta.name, texto);
+    const textos = [...form.elements].filter((el) => el.type === 'text' && el.name);
+    const inContacto = textos.find((el) => /contacto/i.test(el.name) && !/fecha/i.test(el.name));
+    if (inContacto) datos.set(inContacto.name, contacto);
+    textos.filter((el) => /fecha/i.test(el.name)).forEach((el) => datos.set(el.name, ''));
+    const btn = [...form.elements].find((el) => el.type === 'submit' && /continuar/i.test(el.value || ''));
+    if (btn && btn.name) datos.set(btn.name, btn.value);
+    const destino = new URL(form.getAttribute('action') || url, location.origin + url).href;
+    const resp = await fetch(destino, { method: 'POST', credentials: 'same-origin', body: datos });
+    const rd = new DOMParser().parseFromString(await resp.text(), 'text/html');
+    const err = rd.querySelector('.messages.error, .messages--error, .alert-danger');
+    if (err && err.textContent.trim()) throw new Error(err.textContent.replace(/\s+/g, ' ').trim().slice(0, 160));
+    const est = await estadoOtst(o);
+    if (!est || ESTADO_LLAMADA.test(est)) throw new Error('la intranet no la cambió de estado');
+    return { est, ya: false };
+  }
+
+  // OTST del encabezado que faltan por cerrar (solo si esta es la del seguimiento)
+  function pendientesDelGrupo(area) {
+    const otst = otstActual();
+    const enc = area ? leerEncabezado(area.value) : null;
+    if (!enc || enc.seguimiento !== otst || !enc.otsts.includes(otst)) return null;
+    const regs = registradasHoy();
+    const otras = enc.otsts.filter((o) => o !== otst && !regs.has(o));
+    return otras.length ? { enc, otras } : null;
+  }
+
+  let grupoListo = false;
+  let confirmado = false;
+
+  function autoGrupo(e, select) {
+    if (grupoListo || !ctx || !ctx.config.auto_cierre_grupo) return;
+    const area = areaObservacion(select);
+    const pend = pendientesDelGrupo(area);
+    if (!pend) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (document.getElementById('hll-overlay')) return;
+    const efectivo = esEfectivo(select);
+    const inFecha = inputTrasEtiqueta('Fecha para Próximo Contacto');
+    const fechaTxt = !efectivo && inFecha ? inFecha.value.trim() : '';
+    if (!efectivo && !fechaTxt) { avisoModal('Elige primero la fecha de próximo contacto de esta OTST (donde queda el seguimiento). Las demás se cierran al dar Continuar.'); return; }
+    if (area.value.replace(RE_ENCABEZADO, '').trim().length < 3) { avisoModal('Escribe debajo del encabezado lo que se habló: ese texto queda en todas las OTST del grupo.'); return; }
+    const inContacto = inputTrasEtiqueta('Nombre Contacto');
+    const contacto = inContacto ? inContacto.value.trim() : '';
+    const otst = otstActual();
+    const texto = area.value;
+
+    abrirModal((m, cerrar, bloquear) => {
+      const h = document.createElement('h3'); h.textContent = 'Llamada agrupada: cerrar las demás OTST';
+      const p = document.createElement('p'); p.textContent = `Se cerrarán con «contacto efectivo», el mismo texto${contacto ? ` y el contacto ${contacto}` : ''}. Después se registra esta.`;
+      const ul = document.createElement('ul');
+      const estados = {};
+      const item = (o, txt) => {
+        const li = document.createElement('li'); const b = document.createElement('b'); b.textContent = o;
+        const s = document.createElement('span'); s.className = 'e'; li.append(b, ` — ${txt}`, s); ul.appendChild(li); estados[o] = s;
+      };
+      pend.otras.forEach((o) => item(o, 'se cierra (contacto efectivo)'));
+      item(otst, efectivo ? 'esta: se cierra (contacto efectivo)' : `esta: Contactar nuevamente → ${fechaTxt}`);
+      const btns = document.createElement('div'); btns.className = 'btns';
+      const no = boton('Cancelar', '', cerrar);
+      const ok = boton(`Sí, cerrar ${pend.otras.length} y continuar`, 'ok', async () => {
+        bloquear(true); ok.disabled = no.disabled = true;
+        const fallas = [];
+        for (const o of pend.otras) {
+          estados[o].className = 'e'; estados[o].textContent = '⏳ cerrando…';
+          try {
+            const r = await cerrarOtst(o, texto, contacto);
+            if (!r.ya) {
+              encolarLlamada({ id: uuid(), otst: o, accion: 'efectiva', proximo_contacto: null, observacion: texto, contacto,
+                grupo: pend.enc.seguimiento, otsts_grupo: pend.enc.otsts, automatica: true });
+            }
+            estados[o].className = 'e ok'; estados[o].textContent = r.ya ? `✔ ya estaba: ${r.est}` : `✅ ${r.est}`;
+          } catch (err) {
+            fallas.push(o);
+            estados[o].className = 'e mal'; estados[o].textContent = `❌ ${err.message.replace(/\.+$/, '')}. `;
+            const a = document.createElement('a'); a.href = `/stecnico/item/${o}/diagnosiscall`; a.target = '_blank'; a.textContent = 'Hacerla a mano';
+            estados[o].appendChild(a);
+          }
+        }
+        enviarPendientes();
+        bloquear(false);
+        const continuar = () => {
+          cerrar();
+          grupoListo = true; confirmado = true;
+          const btn = botonContinuar();
+          if (btn) btn.click(); else if (select.form) select.form.requestSubmit();
+          setTimeout(() => { grupoListo = false; confirmado = false; }, 1500);
+        };
+        if (!fallas.length) { estados[otst].className = 'e ok'; estados[otst].textContent = '⏳ registrando…'; setTimeout(continuar, 700); return; }
+        p.textContent = `No se pudo${fallas.length > 1 ? 'n' : ''} cerrar ${fallas.join(', ')}. Esta OTST aún no se ha registrado.`;
+        no.disabled = false; no.textContent = 'Revisar';
+        ok.disabled = false; ok.textContent = 'Registrar solo esta';
+        const ok2 = ok.cloneNode(true); ok.replaceWith(ok2);
+        ok2.addEventListener('click', continuar);
+      });
+      btns.append(no, ok);
+      m.append(h, p, ul, btns); ok.focus();
+    });
+  }
+
+  // Confirmación antes de cerrar la comunicación («contacto efectivo»)
+  function proteger(e, select) {
+    if (confirmado || !esEfectivo(select)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const campo = inputTrasEtiqueta('Nombre Contacto');
+    modalConfirmar((campo && campo.value.trim()) || '', () => {
+      confirmado = true;
+      const btn = botonContinuar();
+      if (btn) btn.click();
+      setTimeout(() => { confirmado = false; }, 1500);
+    });
+  }
+
+  // Al enviar el formulario (si nadie lo canceló): la llamada queda encolada y se
+  // envía a la app cuando carga la página siguiente.
+  let registrado = false;
+  function registrarLlamada(e, select) {
+    if (registrado || e.defaultPrevented) return;
+    registrado = true;
+    const otst = otstActual();
+    const efectivo = esEfectivo(select);
+    const inFecha = inputTrasEtiqueta('Fecha para Próximo Contacto');
+    const fecha = !efectivo && inFecha ? parsear(inFecha.value) : null;
+    const area = areaObservacion(select);
+    const inContacto = inputTrasEtiqueta('Nombre Contacto');
+    const enc = area ? leerEncabezado(area.value) : null;
+    const enGrupo = enc && enc.otsts.includes(otst);
+    encolarLlamada({
+      id: uuid(), otst, accion: efectivo ? 'efectiva' : 'reprogramada', proximo_contacto: fecha ? clave(fecha) : null,
+      observacion: area ? area.value : '', contacto: inContacto ? inContacto.value.trim() : '',
+      grupo: enGrupo ? enc.seguimiento : null, otsts_grupo: enGrupo ? enc.otsts : [], automatica: false,
+    });
+    // Llamada agrupada guiada: aviso de las OTST que faltan por registrar
+    if (enGrupo) {
+      const regs = registradasHoy();
+      const faltan = enc.otsts.filter((o) => o !== otst && !regs.has(o)
+        && !(ctx && ctx.config.auto_cierre_grupo && otst === enc.seguimiento));
+      const fila = filaDe(otst);
+      GM_setValue(G.grupo, faltan.length ? { faltan, cliente: fila ? fila.cliente : '', ts: Date.now() } : null);
+    } else {
+      const g = GM_getValue(G.grupo, null);
+      if (g && g.faltan) GM_setValue(G.grupo, { ...g, faltan: g.faltan.filter((o) => o !== otst) });
+    }
+  }
+
+  // ── Preparación del formulario (idempotente: se repite cuando la página cambia) ──
+  let primeraVez = true;
+  function prepararFormulario() {
+    const select = selectAccion();
+    if (!select) return;
+    estilos();
+    if (primeraVez) {
+      primeraVez = false;
+      if (!select.value) elegirAccion(select, false); // por defecto «Contactar nuevamente»
+      select.addEventListener('change', () => setTimeout(() => asegurarCalendario(select), 60));
+      const btn = botonContinuar();
+      // Primero el cierre automático del grupo (opción B), luego la confirmación de «contacto efectivo»
+      if (btn) btn.addEventListener('click', (e) => autoGrupo(e, select), true);
+      if (btn) btn.addEventListener('click', (e) => proteger(e, select), true);
+      if (select.form) {
+        select.form.addEventListener('submit', (e) => autoGrupo(e, select), true);
+        select.form.addEventListener('submit', (e) => proteger(e, select), true);
+        // Fase de burbuja: solo registra si nadie canceló el envío
+        select.form.addEventListener('submit', (e) => registrarLlamada(e, select));
+      }
+    }
+    asegurarMensajes(select);
+    asegurarCalendario(select);
+    asegurarGrupo(select);
+    asegurarAvisos(select);
+  }
+
+  async function iniciarFormulario() {
+    prepararFormulario();
+    let t = null;
+    new MutationObserver(() => { clearTimeout(t); t = setTimeout(prepararFormulario, 150); })
+      .observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+    if (!GM_getValue(G.token, '')) return;
+    try {
+      ctx = await enviar({ accion: 'contexto', otst: otstActual() });
+      plan = calcularCarga(ctx);
+      prepararFormulario();
+    } catch (e) {
+      const barra = document.getElementById('hll-msgs');
+      if (barra) barra.textContent = `Mensajes rápidos: no se pudo cargar desde la app (${e.message}).`;
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // Configuración
+  // ─────────────────────────────────────────────
+  GM_registerMenuCommand('Configurar token de llamadas', async () => {
+    const actual = GM_getValue(G.token, '');
+    const nuevo = prompt('Pega tu token personal (lo generas en la app → Llamadas → Conectar intranet).\nDéjalo vacío para quitarlo.', actual ? `${actual.slice(0, 10)}…` : '');
+    if (nuevo === null || nuevo.endsWith('…')) return;
+    const t = nuevo.trim();
+    if (t && !/^hll_[0-9a-f]{48}$/.test(t)) { alert('Ese no parece un token válido (empieza por hll_).'); return; }
+    GM_setValue(G.token, t);
+    if (!t) { pintar(); return; }
+    try {
+      const r = await enviar({ accion: 'ping' });
+      alert(`Conectado como ${r.usuario || 'usuario sin nombre'}.`);
+      GM_setValue(G.ultima, 0);
+      if (ES_LIBRO) enviarEstaPagina(); else quizasReleer();
+      enviarPendientes();
+    } catch (e) {
+      alert(`No se pudo conectar: ${e.message}`);
+    }
+  });
+
+  GM_registerMenuCommand('Enviar la cola ahora', () => {
+    GM_setValue(G.ultima, 0);
+    if (ES_LIBRO) enviarEstaPagina(); else quizasReleer();
+  });
+
+  // Para cuando la cola sí bajó de golpe (p. ej. cierre masivo) y el servidor rechazó la lectura
+  GM_registerMenuCommand('Forzar envío (la cola sí bajó)', () => {
+    if (!ES_LIBRO) { alert('Abre el Libro de Trabajo con Modo «Todos los items» y vuelve a usar esta opción.'); return; }
+    let lectura;
+    try { lectura = leerDocumento(document); } catch (e) { alert(`No se pudo leer la lista: ${e.message}`); return; }
+    if (!lectura.completa) { alert(`La lista no parece completa (${lectura.modo}). Cambia Modo a «Todos los items», dale Filtrar y vuelve a intentarlo.`); return; }
+    const n = lectura.filas.length;
+    if (!confirm(`Se enviarán ${n} OTST como la cola completa. Las que no estén en esta lista se marcarán como salidas. ¿Continuar?`)) return;
+    enviarEstaPagina(true);
+  });
+
+  // ─────────────────────────────────────────────
+  // Inicio
+  // ─────────────────────────────────────────────
+  descartarSiFallo();
+  enviarPendientes();
+  setTimeout(enviarPendientes, 4000);
+  pintarAvisoGrupo();
+  if (ES_LLAMADA) iniciarFormulario();
+
+  if (ES_LIBRO && GM_getValue(G.token, '')) {
+    GM_setValue(G.bloqueo, Date.now());
+    enviarEstaPagina().finally(() => GM_setValue(G.bloqueo, 0));
+  } else {
+    pintar();
+    quizasReleer();
+  }
+  setInterval(() => { quizasReleer(); pintar(); enviarPendientes(); pintarAvisoGrupo(); }, REVISAR_MS);
+})();
