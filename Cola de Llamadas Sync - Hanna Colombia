@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Cola de Llamadas Sync - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      0.3.0
-// @description  Conecta la intranet con la app de Servicio Técnico (módulo Llamadas). En el Libro de Trabajo: envía la lista "Esperando Llamada Seguimiento Diagnóstico" (y la relee cada 10 min con cualquier pestaña de la intranet abierta). En el formulario "Llamada de Seguimiento Diagnóstico": fecha sugerida con la carga real del equipo, calendario con festivos, mensajes rápidos compartidos, avisos de prioritaria y de quién está llamando, llamada agrupada por cliente y registro de la llamada en la bitácora al dar Continuar. Nunca presiona Continuar por ti (salvo el cierre automático del grupo, si lo activas en la app).
+// @version      0.4.0
+// @description  Conecta la intranet con la app de Servicio Técnico (módulo Llamadas). En el Libro de Trabajo: envía la lista "Esperando Llamada Seguimiento Diagnóstico" (y la relee cada 10 min con cualquier pestaña de la intranet abierta). En el formulario "Llamada de Seguimiento Diagnóstico": fecha sugerida con la carga real del equipo, calendario con festivos, mensajes rápidos compartidos, avisos de prioritaria y de quién está llamando, llamada agrupada por cliente y registro de la llamada en la bitácora al dar Continuar. Nunca presiona Continuar por ti (salvo el cierre automático del grupo, si lo activas en la app). En el reporte "Facturación Servicio Técnico In-situ": envía la facturación del mes a Indicadores (y la relee cada 15 min).
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/*
 // @grant        GM_xmlhttpRequest
@@ -23,7 +23,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.0';
+  const VERSION = '0.4.0';
   const ENDPOINT = 'https://mmawukdxoryswwnjhydl.supabase.co/functions/v1/llamadas-sync';
   const URL_LIBRO = '/stecnico/libro_trabajo';
   const ES_LIBRO = location.pathname.startsWith(URL_LIBRO);
@@ -36,6 +36,10 @@
     token: 'hll_token', ultima: 'hll_ultima_lectura', bloqueo: 'hll_bloqueo', estado: 'hll_estado',
     pendientes: 'hll_pendientes',     // llamadas registradas aún no confirmadas por la app
     grupo: 'hll_grupo_aviso',         // llamada agrupada en curso: OTST que faltan por registrar
+    factUltima: 'hll_fact_ultima',    // última lectura del reporte de facturación (segundo plano)
+    factBloqueo: 'hll_fact_bloqueo',  // una sola pestaña lee el reporte a la vez
+    factEstado: 'hll_fact_estado',    // resultado de la última lectura (indicador en el reporte)
+    factPausa: 'hll_fact_pausa',      // sin acceso al reporte o a Indicadores: no reintentar hasta esta hora
   };
 
   // ─────────────────────────────────────────────
@@ -174,13 +178,13 @@
   // ─────────────────────────────────────────────
   // Envío a llamadas-sync
   // ─────────────────────────────────────────────
-  function enviar(cuerpo) {
+  function enviar(cuerpo, url = ENDPOINT) {
     const token = GM_getValue(G.token, '');
     if (!token) return Promise.reject(new Error('falta configurar el token (menú de Tampermonkey)'));
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: 'POST',
-        url: ENDPOINT,
+        url,
         headers: { 'Content-Type': 'application/json', 'x-llamadas-token': token },
         data: JSON.stringify(cuerpo),
         timeout: 30000,
@@ -1132,6 +1136,177 @@
     }
   }
 
+  // ═════════════════════════════════════════════
+  // Indicadores: reporte "Facturación Servicio Técnico In-situ"
+  // (/sgv/reportes/facturacion_st_insitu). Se lee el mes completo y se envía a
+  // indicadores-sync, que reemplaza ese mes. Como el filtro de fechas se guarda
+  // en la sesión de la intranet, pedir un mes cambia el rango que verás al abrir
+  // el reporte (queda en el mes actual).
+  // ═════════════════════════════════════════════
+  const ENDPOINT_IND = 'https://mmawukdxoryswwnjhydl.supabase.co/functions/v1/indicadores-sync';
+  const URL_FACT = '/sgv/reportes/facturacion_st_insitu';
+  const ES_FACT = location.pathname.startsWith(URL_FACT);
+  const FACT_CADA_MS = 15 * 60 * 1000;
+  const FACT_PAUSA_MS = 24 * 3600 * 1000;
+
+  const aIso = (dmy) => { const f = parsear(dmy); return f ? clave(f) : ''; };
+  const aDmy = (f) => `${pad(f.getDate())}/${pad(f.getMonth() + 1)}/${f.getFullYear()}`;
+  // "$-1.400.000" / "$1.570.000" / "1.570.000,50" -> entero en pesos
+  const dinero = (t) => {
+    const n = String(t || '').replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.');
+    return Number.isFinite(parseFloat(n)) ? Math.round(parseFloat(n)) : 0;
+  };
+
+  function formularioFacturacion(doc) {
+    return [...doc.forms].find((f) => [...f.elements].some((e) => e.name === 'form_id' && /facturacion_st_insitu/i.test(e.value))) || null;
+  }
+
+  function camposFecha(form) {
+    const els = [...form.elements];
+    return {
+      inicio: els.find((e) => /fecha_inicio/i.test(e.name || '')),
+      fin: els.find((e) => /fecha_fin/i.test(e.name || '')),
+    };
+  }
+
+  // { desde, hasta, filas } de una página del reporte (o lanza error si no es el reporte)
+  function leerFacturacion(doc) {
+    const form = formularioFacturacion(doc);
+    if (!form) throw new Error('no se encontró el reporte (¿sin sesión o sin acceso en la intranet?)');
+    const { inicio, fin } = camposFecha(form);
+    const desde = aIso(inicio && inicio.value), hasta = aIso(fin && fin.value);
+    const tabla = [...doc.querySelectorAll('table')].reverse()
+      .find((t) => t.rows.length && /total\s*ítem/i.test(t.rows[0].textContent));
+    if (!tabla) return { desde, hasta, filas: [] };
+    const cab = [...tabla.rows[0].cells].map((c) => norm(c.textContent));
+    const col = (re) => cab.findIndex((h) => re.test(h));
+    const i = {
+      zona: col(/^zona/), depto: col(/^departamento/), ciudad: col(/^ciudad/), tipo: col(/documento\s*tipo/),
+      num: col(/documento\s*n/), fecha: col(/documento\s*fecha/), nit: col(/^nit/), cliente: col(/raz[oó]n social/),
+      vcod: col(/vendedor\s*c[oó]digo/), vnom: col(/vendedor\s*nombre/), codigo: col(/^c[oó]digo$/),
+      desc: col(/^descripci/), cant: col(/^cantidad/), precio: col(/precio/), total: col(/total\s*ítem/),
+    };
+    if (i.codigo < 0 || i.total < 0) throw new Error('la tabla no tiene Código o Total ítem (¿cambió la intranet?)');
+    const filas = [...tabla.rows].slice(1).map((r) => {
+      const tx = (k) => (i[k] >= 0 && r.cells[i[k]] ? limpio(r.cells[i[k]].textContent) : '');
+      if (!tx('codigo') && !tx('total')) return null;
+      return {
+        zona: tx('zona'), departamento: tx('depto'), ciudad: tx('ciudad'), doc_tipo: tx('tipo'), doc_numero: tx('num'),
+        doc_fecha: (tx('fecha').match(/^\d{4}-\d{2}-\d{2}/) || [''])[0], nit: tx('nit'), cliente: tx('cliente'),
+        vendedor_codigo: tx('vcod'), vendedor_nombre: tx('vnom'), codigo: tx('codigo'), descripcion: tx('desc'),
+        cantidad: tx('cant').replace(/\./g, '').replace(',', '.') || '0',
+        precio_unitario: dinero(tx('precio')), total: dinero(tx('total')),
+      };
+    }).filter(Boolean);
+    return { desde, hasta, filas };
+  }
+
+  // Pide el reporte de un mes: envía el formulario de la intranet con las fechas
+  async function pedirMes(anio, mes) {
+    const base = new DOMParser().parseFromString(await (await fetch(URL_FACT, { credentials: 'same-origin' })).text(), 'text/html');
+    const form = formularioFacturacion(base);
+    if (!form) throw new Error('no se encontró el reporte (¿sin sesión o sin acceso en la intranet?)');
+    const { inicio, fin } = camposFecha(form);
+    if (!inicio || !fin) throw new Error('el reporte no tiene los campos de fecha (¿cambió la intranet?)');
+    const datos = new URLSearchParams();
+    for (const el of form.elements) {
+      if (!el.name || el.disabled || el.type === 'button') continue;
+      if (el.type === 'submit' && !/filtrar/i.test(el.value || '')) continue;
+      datos.append(el.name, el.value);
+    }
+    datos.set(inicio.name, aDmy(new Date(anio, mes - 1, 1)));
+    datos.set(fin.name, aDmy(new Date(anio, mes, 0)));
+    const destino = new URL(form.getAttribute('action') || URL_FACT, location.origin).href;
+    const resp = await fetch(destino, { method: 'POST', credentials: 'same-origin', body: datos });
+    const doc = new DOMParser().parseFromString(await resp.text(), 'text/html');
+    const lectura = leerFacturacion(doc);
+    const esperado = `${anio}-${pad(mes)}`;
+    if (lectura.desde !== `${esperado}-01` || lectura.hasta.slice(0, 7) !== esperado) {
+      throw new Error(`la intranet no aplicó el filtro de ${esperado}`);
+    }
+    return lectura;
+  }
+
+  function guardarEstadoFact(e) {
+    GM_setValue(G.factEstado, { ...e, ts: Date.now() });
+    pintarFact();
+  }
+
+  const fmtPesos = (n) => '$' + Math.round(n).toLocaleString('es-CO');
+
+  async function enviarFacturacion(lectura, forzar = false) {
+    try {
+      const r = await enviar({ accion: 'facturacion', ...lectura, forzar, version: VERSION }, ENDPOINT_IND);
+      guardarEstadoFact({ ok: true, texto: `${pad(r.mes)}/${r.anio}: ${r.filas} ítems · Mant. ${fmtPesos(r.mantenimiento)} · Calib. ${fmtPesos(r.calibracion)}` });
+      return r;
+    } catch (e) {
+      // Sin acceso al módulo Indicadores (o token revocado): no insistir hoy
+      if (/Indicadores|Token/i.test(e.message) && !e.rechazada) GM_setValue(G.factPausa, Date.now() + FACT_PAUSA_MS);
+      guardarEstadoFact({ ok: false, texto: e.rechazada ? `Lectura rechazada: ${e.message}` : e.message });
+      throw e;
+    }
+  }
+
+  // Segundo plano: mes actual (y el anterior los primeros 5 días, por notas crédito tardías).
+  // El mes anterior va primero para que la sesión de la intranet quede en el mes actual.
+  async function quizasLeerFacturacion() {
+    if (!GM_getValue(G.token, '')) return;
+    const ahora = Date.now();
+    if (ahora < GM_getValue(G.factPausa, 0)) return;
+    if (ahora - GM_getValue(G.factUltima, 0) < FACT_CADA_MS) return;
+    if (ahora - GM_getValue(G.factBloqueo, 0) < BLOQUEO_MS) return;
+    GM_setValue(G.factBloqueo, ahora);
+    GM_setValue(G.factUltima, ahora);
+    const hoy = new Date();
+    const meses = [[hoy.getFullYear(), hoy.getMonth() + 1]];
+    if (hoy.getDate() <= 5) { const a = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1); meses.unshift([a.getFullYear(), a.getMonth() + 1]); }
+    try {
+      for (const [anio, mes] of meses) await enviarFacturacion(await pedirMes(anio, mes));
+    } catch (e) {
+      if (/no se encontró el reporte/.test(e.message)) GM_setValue(G.factPausa, Date.now() + FACT_PAUSA_MS);
+      if (!GM_getValue(G.factEstado, null) || GM_getValue(G.factEstado, null).ok) guardarEstadoFact({ ok: false, texto: e.message });
+    } finally {
+      GM_setValue(G.factBloqueo, 0);
+    }
+  }
+
+  // Indicador en la página del reporte
+  function pintarFact() {
+    if (!ES_FACT) return;
+    let el = document.getElementById('hll-fact');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'hll-fact';
+      el.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:2147483000;padding:7px 12px;border-radius:16px;'
+        + 'font:12px Arial,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.2);cursor:pointer;max-width:420px';
+      el.title = 'Facturación → Indicadores de la app de Servicio Técnico. Clic para enviar de nuevo.';
+      el.addEventListener('click', () => enviarFacturacionPagina());
+      document.body.appendChild(el);
+    }
+    const e = GM_getValue(G.factEstado, null);
+    const token = GM_getValue(G.token, '');
+    el.style.background = !token ? '#fff1c2' : e && e.ok ? '#e3f4e8' : e ? '#f8d0cc' : '#eef3f9';
+    el.style.color = !token ? '#8a6100' : e && e.ok ? '#1e6b3a' : e ? '#8c1d12' : '#0b3d78';
+    const hace = e ? Math.max(0, Math.round((Date.now() - e.ts) / 60000)) : 0;
+    el.textContent = !token ? '📊 Indicadores: falta el token (menú de Tampermonkey)'
+      : !e ? '📊 Indicadores: enviando…'
+      : `📊 ${e.ok ? '✓' : '⚠'} ${e.texto}${hace ? ` · hace ${hace} min` : ''}`;
+  }
+
+  // La página abierta: se envía solo si el rango filtrado es un mes completo
+  async function enviarFacturacionPagina(forzar = false) {
+    let lectura;
+    try { lectura = leerFacturacion(document); } catch (e) { guardarEstadoFact({ ok: false, texto: e.message }); return; }
+    const [y, m] = lectura.desde.split('-').map(Number);
+    const completo = lectura.desde.endsWith('-01') && y && lectura.hasta === clave(new Date(y, m, 0));
+    if (!completo) {
+      guardarEstadoFact({ ok: false, texto: 'Rango parcial: para Indicadores filtra un mes completo (del 1 al último día)' });
+      return;
+    }
+    guardarEstadoFact({ ok: true, texto: 'enviando…' });
+    try { await enviarFacturacion(lectura, forzar); } catch (e) { /* ya quedó en el indicador */ }
+  }
+
   // ─────────────────────────────────────────────
   // Configuración
   // ─────────────────────────────────────────────
@@ -1170,6 +1345,17 @@
     enviarEstaPagina(true);
   });
 
+  GM_registerMenuCommand('Indicadores: enviar la facturación ahora', () => {
+    GM_setValue(G.factUltima, 0); GM_setValue(G.factPausa, 0);
+    if (ES_FACT) enviarFacturacionPagina(); else quizasLeerFacturacion();
+  });
+
+  GM_registerMenuCommand('Indicadores: forzar envío (el mes sí bajó)', () => {
+    if (!ES_FACT) { alert('Abre el reporte Facturación Servicio Técnico In-situ filtrado por el mes completo y vuelve a usar esta opción.'); return; }
+    if (!confirm('Se reemplazará el mes en Indicadores con lo que ves en esta página. ¿Continuar?')) return;
+    enviarFacturacionPagina(true);
+  });
+
   // ─────────────────────────────────────────────
   // Inicio
   // ─────────────────────────────────────────────
@@ -1186,5 +1372,8 @@
     pintar();
     quizasReleer();
   }
-  setInterval(() => { quizasReleer(); pintar(); enviarPendientes(); pintarAvisoGrupo(); }, REVISAR_MS);
+  if (ES_FACT && GM_getValue(G.token, '')) { GM_setValue(G.factUltima, Date.now()); enviarFacturacionPagina(); }
+  else setTimeout(quizasLeerFacturacion, 20000); // no compite con la lectura del Libro al cargar
+  pintarFact();
+  setInterval(() => { quizasReleer(); pintar(); enviarPendientes(); pintarAvisoGrupo(); quizasLeerFacturacion(); pintarFact(); }, REVISAR_MS);
 })();
