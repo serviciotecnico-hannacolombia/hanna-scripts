@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cola de Llamadas Sync - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      0.4.0
+// @version      0.4.1
 // @description  Conecta la intranet con la app de Servicio Técnico (módulo Llamadas). En el Libro de Trabajo: envía la lista "Esperando Llamada Seguimiento Diagnóstico" (y la relee cada 10 min con cualquier pestaña de la intranet abierta). En el formulario "Llamada de Seguimiento Diagnóstico": fecha sugerida con la carga real del equipo, calendario con festivos, mensajes rápidos compartidos, avisos de prioritaria y de quién está llamando, llamada agrupada por cliente y registro de la llamada en la bitácora al dar Continuar. Nunca presiona Continuar por ti (salvo el cierre automático del grupo, si lo activas en la app). En el reporte "Facturación Servicio Técnico In-situ": envía la facturación del mes a Indicadores (y la relee cada 15 min).
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/*
@@ -23,7 +23,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.4.0';
+  const VERSION = '0.4.1';
   const ENDPOINT = 'https://mmawukdxoryswwnjhydl.supabase.co/functions/v1/llamadas-sync';
   const URL_LIBRO = '/stecnico/libro_trabajo';
   const ES_LIBRO = location.pathname.startsWith(URL_LIBRO);
@@ -448,9 +448,10 @@
       #hll-cal .c-dia:hover { background: #d8e6f5; }
       #hll-cal .c-dia.finde { color: #a5b0bd; background: #fafbfc; }
       #hll-cal .c-dia.festivo { color: #c0392b; background: #fafbfc; text-decoration: line-through; }
-      #hll-cal .c-dia.libre { background: #e3f4e8; }
-      #hll-cal .c-dia.medio { background: #fff1c2; }
-      #hll-cal .c-dia.lleno { background: #f8d0cc; color: #8c1d12; }
+      #hll-cal .c-dia.libre { background: #dceafa; }
+      #hll-cal .c-dia.sug { background: #e3f4e8; color: #1e6b3a; font-weight: 700; }
+      #hll-cal .c-dia.tope { background: #fff1c2; color: #8a6100; }
+      #hll-cal .c-dia.pasado-tope { background: #f8d0cc; color: #8c1d12; font-weight: 700; }
       #hll-cal .c-dia.hoy { outline: 2px solid #f0c040; outline-offset: -2px; }
       #hll-cal .c-dia.pasado { opacity: .35; cursor: not-allowed; background: #f6f8fb; color: #1f2d3d; }
       #hll-cal .c-dia.sel { background: #0b6fd6; color: #fff; font-weight: 700; }
@@ -503,25 +504,23 @@
   let ctx = null;          // respuesta de 'contexto' (null si no hay token o falló)
   let plan = null;         // { carga, cupoEq, sugerida }
 
-  // Carga de seguimiento por día hábil (mismo cálculo que la agenda de la app)
+  // Seguimientos del equipo por día hábil, desde mañana: lo programado de verdad,
+  // sin redistribuir (mismo cálculo que la gráfica de la app, planificar() en
+  // src/modules/llamadas/agenda/plan.ts). Hoy y lo vencido no cuentan (nunca se
+  // reprograma para el mismo día); lo agendado en fin de semana o festivo cuenta
+  // en el siguiente día hábil.
+  // Sugerida = primer día hábil desde mañana por debajo del tope del equipo.
   function calcularCarga(c) {
     const ahora = new Date();
     const hoyK = clave(ahora);
-    const inicio = esHabil(ahora) ? d0(ahora) : sigHabil(ahora);
-    const inicioK = clave(inicio);
     const cupoEq = Math.max(1, (c.config && c.config.cupo_seguimiento_equipo) || 10);
     const carga = {};
-    const atendidaHoy = (f) => f.atendida_en && clave(new Date(f.atendida_en)) === hoyK;
-    const segHechas = c.cola.filter((f) => atendidaHoy(f) && f.contacto_anterior).length;
-    if (inicioK === hoyK && segHechas) carga[hoyK] = Math.min(cupoEq, segHechas);
-    c.cola.filter((f) => !f.salio_en && f.proximo_contacto)
-      .sort((a, b) => a.proximo_contacto.localeCompare(b.proximo_contacto) || (b.dias_en_estado || 0) - (a.dias_en_estado || 0))
-      .forEach((f) => {
-        let d = f.proximo_contacto <= inicioK ? inicio : deClave(f.proximo_contacto);
-        if (!esHabil(d)) d = sigHabil(d);
-        while ((carga[clave(d)] || 0) >= cupoEq) d = sigHabil(d);
-        carga[clave(d)] = (carga[clave(d)] || 0) + 1;
-      });
+    c.cola.forEach((f) => {
+      if (f.salio_en || !f.proximo_contacto || f.proximo_contacto <= hoyK) return;
+      const d = deClave(f.proximo_contacto);
+      const k = clave(esHabil(d) ? d : sigHabil(d));
+      carga[k] = (carga[k] || 0) + 1;
+    });
     let s = sigHabil(ahora);
     for (let i = 0; i < 250 && (carga[clave(s)] || 0) >= cupoEq; i++) s = sigHabil(s);
     return { carga, cupoEq, sugerida: s };
@@ -571,9 +570,13 @@
       let carga = '';
       if (esFestivo(f) && !esFinDeSemana(f)) { carga = ' festivo'; b.title = 'Festivo'; }
       else if (plan && f > hoy && esHabil(f)) {
+        // Mismos colores que la app: azul con espacio, verde sugerida, amarillo en el tope, rojo pasado del tope
         const n = cargaDe(f);
-        carga = n >= plan.cupoEq ? ' lleno' : n >= plan.cupoEq * 0.7 ? ' medio' : ' libre';
-        b.title = `${n}/${plan.cupoEq} seguimientos planeados (equipo)`;
+        const sug = mismoDia(f, plan.sugerida);
+        carga = n > plan.cupoEq ? ' pasado-tope' : n === plan.cupoEq ? ' tope' : sug ? ' sug' : n > 0 ? ' libre' : '';
+        b.title = `${n}/${plan.cupoEq} seguimientos programados (equipo)`
+          + (n > plan.cupoEq ? ` · ${n - plan.cupoEq} por encima del tope` : n === plan.cupoEq ? ' · en el tope' : ` · caben ${plan.cupoEq - n} más`)
+          + (sug ? ' · fecha sugerida' : '');
       }
       b.className = 'c-dia' + (esFinDeSemana(f) ? ' finde' : '') + carga + (mismoDia(f, hoy) ? ' hoy' : '') + (f < hoy ? ' pasado' : '') + (mismoDia(f, sel) ? ' sel' : '');
       b.textContent = d;
@@ -589,7 +592,7 @@
     if (plan) { const s = plan.sugerida; lista.unshift([`Sugerida ${pad(s.getDate())}/${pad(s.getMonth() + 1)}`, () => s, 'sug']); }
     lista.forEach(([txt, fn, cls]) => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'c-atajo' + (cls ? ' ' + cls : ''); b.textContent = txt;
-      if (cls === 'sug') b.title = 'Primer día hábil con cupo de seguimiento libre (equipo)';
+      if (cls === 'sug') b.title = 'Primer día hábil desde mañana por debajo del tope de seguimientos del equipo';
       b.addEventListener('click', () => { const f = fn(); cal.vista = new Date(f.getFullYear(), f.getMonth(), 1); actualizarInput(input, f); });
       atajos.appendChild(b);
     });
@@ -600,8 +603,9 @@
     else if (!esHabil(sel)) { res.className += ' alerta'; res.textContent = `⚠ ${formatear(sel)} no es día hábil${esFestivo(sel) ? ' (festivo)' : ''}.`; }
     else if (plan && cargaDe(sel) >= plan.cupoEq) {
       res.className += ' alerta';
-      res.textContent = `⚠ El ${formatear(sel)} ya tiene ${cargaDe(sel)}/${plan.cupoEq} seguimientos. Sugerida: ${formatear(plan.sugerida)}.`;
-    } else if (plan) res.textContent = `${formatear(sel)}: ${cargaDe(sel)}/${plan.cupoEq} seguimientos del equipo. Verde = con cupo, amarillo = casi lleno, rojo = lleno.`;
+      res.textContent = `⚠ El ${formatear(sel)} ya tiene ${cargaDe(sel)}/${plan.cupoEq} seguimientos`
+        + `${cargaDe(sel) > plan.cupoEq ? ' (pasado del tope)' : ' (en el tope)'}. Sugerida: ${formatear(plan.sugerida)}.`;
+    } else if (plan) res.textContent = `${formatear(sel)}: ${cargaDe(sel)}/${plan.cupoEq} seguimientos del equipo. Azul = con espacio, verde = sugerida, amarillo = en el tope, rojo = pasado del tope.`;
     else res.textContent = GM_getValue(G.token, '') ? 'Cargando la carga del equipo…' : 'Configura el token de llamadas para ver la carga del equipo.';
     el.appendChild(res);
   }
