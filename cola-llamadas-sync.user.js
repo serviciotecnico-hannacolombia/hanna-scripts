@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cola de Llamadas Sync - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      0.4.1
+// @version      0.4.2
 // @description  Conecta la intranet con la app de Servicio Técnico (módulo Llamadas). En el Libro de Trabajo: envía la lista "Esperando Llamada Seguimiento Diagnóstico" (y la relee cada 10 min con cualquier pestaña de la intranet abierta). En el formulario "Llamada de Seguimiento Diagnóstico": fecha sugerida con la carga real del equipo, calendario con festivos, mensajes rápidos compartidos, avisos de prioritaria y de quién está llamando, llamada agrupada por cliente y registro de la llamada en la bitácora al dar Continuar. Nunca presiona Continuar por ti (salvo el cierre automático del grupo, si lo activas en la app). En el reporte "Facturación Servicio Técnico In-situ": envía la facturación del mes a Indicadores (y la relee cada 15 min).
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/*
@@ -16,6 +16,10 @@
 // ==/UserScript==
 
 // Diseño: docs/llamadas-tiempo-real.md (fases 1 y 3).
+// Este archivo es la fuente; se publica copiándolo tal cual a
+// serviciotecnico-hannacolombia/hanna-scripts (cola-llamadas-sync.user.js), de
+// donde Tampermonkey lo actualiza. Sube @version y VERSION en cada cambio: si no
+// sube, Tampermonkey no lo actualiza.
 // Configuración: menú de Tampermonkey → "Configurar token de llamadas". El token
 // se genera en la app (módulo Llamadas) y es personal: identifica quién envió la
 // lectura o registró la llamada. Se guarda en Tampermonkey, no en la intranet.
@@ -25,7 +29,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.4.1';
+  const VERSION = '0.4.2';
   const ENDPOINT = 'https://mmawukdxoryswwnjhydl.supabase.co/functions/v1/llamadas-sync';
   const URL_LIBRO = '/stecnico/libro_trabajo';
   const ES_LIBRO = location.pathname.startsWith(URL_LIBRO);
@@ -196,7 +200,9 @@
           if (r.status >= 200 && r.status < 300 && d && d.ok) { resolve(d); return; }
           const err = new Error((d && d.error) || `HTTP ${r.status}`);
           err.rechazada = !!(d && d.rechazada);
-          err.definitivo = !!(d && d.definitivo) || r.status === 401;
+          // Un 401 (token revocado o sin acceso) NO es definitivo: las llamadas pendientes
+          // se conservan hasta que se configure un token válido (o venzan a los 7 días)
+          err.definitivo = !!(d && d.definitivo);
           reject(err);
         },
         onerror: () => reject(new Error('sin conexión con la app')),
@@ -319,11 +325,11 @@
           await enviar({ accion: 'llamada', llamada });
           GM_setValue(G.pendientes, leerPendientes().filter((x) => x.id !== l.id));
         } catch (e) {
-          // Rechazo definitivo (datos inválidos, token revocado): no se reintenta para siempre
+          // Rechazo definitivo (datos inválidos) o más de 7 días sin poder enviarla: se descarta
           if (e.definitivo || Date.now() - l.encolada > 7 * 864e5) {
             GM_setValue(G.pendientes, leerPendientes().filter((x) => x.id !== l.id));
           }
-          if (!e.definitivo) break; // sin conexión: se intenta más tarde
+          if (!e.definitivo) break; // sin conexión o token sin acceso: se intenta más tarde
         }
       }
     } finally {
