@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cola de Llamadas Sync - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      0.5.0
+// @version      0.5.1
 // @description  Conecta la intranet con la app de Servicio Técnico (módulo Llamadas). En el Libro de Trabajo: envía la lista "Esperando Llamada Seguimiento Diagnóstico" (y la relee cada 10 min con cualquier pestaña de la intranet abierta). En el formulario "Llamada de Seguimiento Diagnóstico": fecha sugerida con la carga real del equipo, calendario con festivos, mensajes rápidos compartidos, avisos de prioritaria y de quién está llamando, llamada agrupada por cliente, avisos de la cotización en SGV (cerrada o con seguimiento del asesor) y registro de la llamada en la bitácora al dar Continuar. Lee las «Acciones sobre cotización en SGV» de cada OTST (al abrirla y en segundo plano). Nunca presiona Continuar por ti (salvo el cierre automático del grupo, si lo activas en la app). En el reporte "Facturación Servicio Técnico In-situ": envía la facturación del mes a Indicadores (y la relee cada 15 min).
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/*
@@ -29,7 +29,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.5.0';
+  const VERSION = '0.5.1';
   const ENDPOINT = 'https://mmawukdxoryswwnjhydl.supabase.co/functions/v1/llamadas-sync';
   const URL_LIBRO = '/stecnico/libro_trabajo';
   const ES_LIBRO = location.pathname.startsWith(URL_LIBRO);
@@ -49,6 +49,7 @@
     factPausa: 'hll_fact_pausa',      // sin acceso al reporte o a Indicadores: no reintentar hasta esta hora
     sgvUltima: 'hll_sgv_ultima',      // última lectura de SGV en segundo plano
     sgvBloqueo: 'hll_sgv_bloqueo',    // una sola pestaña lee SGV a la vez
+    sgvEstado: 'hll_sgv_estado',      // resultado de la última lectura de SGV (indicador en el Libro)
   };
 
   // ─────────────────────────────────────────────
@@ -239,6 +240,8 @@
         ? `${r.total} OTST enviadas (+${r.entraron} / −${r.salieron})`
         : `${r.total} OTST enviadas como parcial (${modo}). Para la cola completa pon Modo en «Todos los items» y dale Filtrar`,
     });
+    // Con la cola al día, leer SGV de inmediato (primero las OTST que acaban de entrar)
+    setTimeout(() => quizasLeerSgv(true), 3000);
     return r;
   }
 
@@ -281,10 +284,14 @@
     const ok = token && e && e.ok;
     el.style.background = !token ? '#fff1c2' : ok ? '#e3f4e8' : e ? '#f8d0cc' : '#eef3f9';
     el.style.color = !token ? '#8a6100' : ok ? '#1e6b3a' : e ? '#8c1d12' : '#0b3d78';
-    const hace = e ? Math.max(0, Math.round((Date.now() - e.ts) / 60000)) : 0;
+    const minDe = (x) => Math.max(0, Math.round((Date.now() - x.ts) / 60000));
+    const hace = e ? minDe(e) : 0;
+    const s = GM_getValue(G.sgvEstado, null);
+    el.style.whiteSpace = 'pre-line';
     el.textContent = !token ? '☎ Llamadas: falta el token (menú de Tampermonkey)'
-      : !e ? '☎ Llamadas: enviando…'
-      : `☎ ${e.ok ? '✓' : '⚠'} ${e.texto}${hace ? ` · hace ${hace} min` : ''}`;
+      : (!e ? '☎ Llamadas: enviando…'
+        : `☎ ${e.ok ? '✓' : '⚠'} ${e.texto}${hace ? ` · hace ${hace} min` : ''}`)
+        + (s ? `\n${s.ok ? '✓' : '⚠'} ${s.texto}${minDe(s) ? ` · hace ${minDe(s)} min` : ''}` : '');
   }
 
   async function enviarEstaPagina(forzar = false) {
@@ -369,25 +376,43 @@
 
   const enviarSgv = (lecturas) => enviar({ accion: 'sgv', lecturas });
 
-  // Segundo plano: la app dice qué OTST de la cola faltan por leer (o llevan > 6 h);
-  // una pestaña a la vez, una página cada 1,5 s
-  async function quizasLeerSgv() {
+  // Segundo plano: la app dice qué OTST de la cola toca leer (las nuevas primero,
+  // luego las de hoy y vencidas leídas hace > 2 h, luego el resto con > 6 h);
+  // una pestaña a la vez, una página cada 1,5 s. Corre cada 10 min y justo después
+  // de cada lectura de la cola (forzar), para que las OTST que entran se lean ya.
+  const guardarSgvEstado = (e) => { GM_setValue(G.sgvEstado, { ...e, ts: Date.now() }); pintar(); };
+
+  async function quizasLeerSgv(forzar = false) {
     if (!GM_getValue(G.token, '')) return;
     const ahora = Date.now();
-    if (ahora - GM_getValue(G.sgvUltima, 0) < SGV_CADA_MS) return;
+    if (!forzar && ahora - GM_getValue(G.sgvUltima, 0) < SGV_CADA_MS) return;
     if (ahora - GM_getValue(G.sgvBloqueo, 0) < SGV_BLOQUEO_MS) return;
     GM_setValue(G.sgvBloqueo, ahora);
     GM_setValue(G.sgvUltima, ahora);
     try {
       const { otsts } = await enviar({ accion: 'sgv_pendientes', limite: SGV_POR_VUELTA });
+      // La lista llega como ["42380", …]; se acepta también [{ llamadas_sgv_pendientes: "42380" }, …]
+      const ids = (otsts || []).map((o) => String(o && typeof o === 'object' ? Object.values(o)[0] : o))
+        .filter((o) => /^\d+$/.test(o));
+      if (!ids.length) { guardarSgvEstado({ ok: true, texto: 'SGV al día' }); return; }
       const lecturas = [];
-      for (const o of otsts || []) {
-        try { lecturas.push(await leerSgvDeOtst(o)); } catch (e) { if (/sesión/.test(e.message)) break; }
+      let fallo = '';
+      for (const o of ids) {
+        try { lecturas.push(await leerSgvDeOtst(o)); } catch (e) {
+          fallo = `OTST ${o}: ${e.message}`;
+          if (/sesión/.test(e.message)) break;
+        }
         await espera(SGV_PAUSA_MS);
       }
       if (lecturas.length) await enviarSgv(lecturas);
+      const cerradas = lecturas.filter((l) => resumirSgv(l).cerrada).length;
+      guardarSgvEstado({
+        ok: !!lecturas.length || !fallo,
+        texto: `SGV: ${lecturas.length} de ${ids.length} OTST leídas${cerradas ? ` (${cerradas} ${cerradas === 1 ? 'cerrada' : 'cerradas'})` : ''}${fallo ? ` · ⚠ ${fallo}` : ''}`,
+      });
     } catch (e) {
-      /* sin conexión o sin acceso: se intenta en el próximo intervalo */
+      // sin conexión o sin acceso: se intenta en el próximo intervalo
+      guardarSgvEstado({ ok: false, texto: `SGV: ${e.message}` });
     } finally {
       GM_setValue(G.sgvBloqueo, 0);
     }
@@ -1502,6 +1527,11 @@
   GM_registerMenuCommand('Enviar la cola ahora', () => {
     GM_setValue(G.ultima, 0);
     if (ES_LIBRO) enviarEstaPagina(); else quizasReleer();
+  });
+
+  GM_registerMenuCommand('SGV: leer ahora las OTST pendientes', () => {
+    GM_setValue(G.sgvBloqueo, 0);
+    quizasLeerSgv(true);
   });
 
   // Para cuando la cola sí bajó de golpe (p. ej. cierre masivo) y el servidor rechazó la lectura
