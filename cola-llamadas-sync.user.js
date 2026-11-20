@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Cola de Llamadas Sync - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      0.4.2
-// @description  Conecta la intranet con la app de Servicio Técnico (módulo Llamadas). En el Libro de Trabajo: envía la lista "Esperando Llamada Seguimiento Diagnóstico" (y la relee cada 10 min con cualquier pestaña de la intranet abierta). En el formulario "Llamada de Seguimiento Diagnóstico": fecha sugerida con la carga real del equipo, calendario con festivos, mensajes rápidos compartidos, avisos de prioritaria y de quién está llamando, llamada agrupada por cliente y registro de la llamada en la bitácora al dar Continuar. Nunca presiona Continuar por ti (salvo el cierre automático del grupo, si lo activas en la app). En el reporte "Facturación Servicio Técnico In-situ": envía la facturación del mes a Indicadores (y la relee cada 15 min).
+// @version      0.5.0
+// @description  Conecta la intranet con la app de Servicio Técnico (módulo Llamadas). En el Libro de Trabajo: envía la lista "Esperando Llamada Seguimiento Diagnóstico" (y la relee cada 10 min con cualquier pestaña de la intranet abierta). En el formulario "Llamada de Seguimiento Diagnóstico": fecha sugerida con la carga real del equipo, calendario con festivos, mensajes rápidos compartidos, avisos de prioritaria y de quién está llamando, llamada agrupada por cliente, avisos de la cotización en SGV (cerrada o con seguimiento del asesor) y registro de la llamada en la bitácora al dar Continuar. Lee las «Acciones sobre cotización en SGV» de cada OTST (al abrirla y en segundo plano). Nunca presiona Continuar por ti (salvo el cierre automático del grupo, si lo activas en la app). En el reporte "Facturación Servicio Técnico In-situ": envía la facturación del mes a Indicadores (y la relee cada 15 min).
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/*
 // @grant        GM_xmlhttpRequest
@@ -29,11 +29,12 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.4.2';
+  const VERSION = '0.5.0';
   const ENDPOINT = 'https://mmawukdxoryswwnjhydl.supabase.co/functions/v1/llamadas-sync';
   const URL_LIBRO = '/stecnico/libro_trabajo';
   const ES_LIBRO = location.pathname.startsWith(URL_LIBRO);
   const ES_LLAMADA = /^\/stecnico\/item\/\d+\/diagnosiscall/.test(location.pathname);
+  const ES_ITEM = /^\/stecnico\/item\/\d+\/?$/.test(location.pathname); // «Ver detalle» de la OTST
   const CADA_MS = 10 * 60 * 1000;     // relectura en segundo plano
   const REVISAR_MS = 60 * 1000;       // cada cuánto una pestaña mira si ya toca
   const BLOQUEO_MS = 2 * 60 * 1000;   // una sola pestaña lee a la vez
@@ -46,6 +47,8 @@
     factBloqueo: 'hll_fact_bloqueo',  // una sola pestaña lee el reporte a la vez
     factEstado: 'hll_fact_estado',    // resultado de la última lectura (indicador en el reporte)
     factPausa: 'hll_fact_pausa',      // sin acceso al reporte o a Indicadores: no reintentar hasta esta hora
+    sgvUltima: 'hll_sgv_ultima',      // última lectura de SGV en segundo plano
+    sgvBloqueo: 'hll_sgv_bloqueo',    // una sola pestaña lee SGV a la vez
   };
 
   // ─────────────────────────────────────────────
@@ -294,6 +297,103 @@
   }
 
   // ═════════════════════════════════════════════
+  // Acciones sobre la cotización en SGV (página «Ver detalle» de la OTST)
+  // Tabla que llenan los asesores: Fecha, Tipo, Comentario, Prox. Seguimiento,
+  // Usuario. Se lee al abrir la OTST, en el formulario de llamada y en segundo
+  // plano (las OTST de la cola que la app pide releer), y se envía a la app.
+  // ═════════════════════════════════════════════
+  const SGV_CADA_MS = 10 * 60 * 1000;
+  const SGV_POR_VUELTA = 20;
+  const SGV_PAUSA_MS = 1500;          // entre páginas, para no cargar la intranet
+  const SGV_BLOQUEO_MS = 5 * 60 * 1000;
+  const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // "19/11/2026 11:49:57" (hora de Colombia) -> "2026-11-19T11:49:57-05:00"
+  function fechaHoraIso(t) {
+    const m = (t || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (!m) return null;
+    return `${m[3]}-${pad(m[2])}-${pad(m[1])}T${pad(m[4] || 0)}:${m[5] || '00'}:${m[6] || '00'}-05:00`;
+  }
+  // "23.10.2026" -> "2026-10-23"; "-" -> null
+  function proxIso(t) {
+    const m = (t || '').match(/(\d{1,2})[./](\d{1,2})[./](\d{4})/);
+    if (!m) return null;
+    const f = new Date(+m[3], +m[2] - 1, +m[1]);
+    return f.getMonth() === +m[2] - 1 ? clave(f) : null;
+  }
+
+  // { otst, cotizacion, sin_cotizacion, acciones: [{ fecha, tipo, comentario, prox, usuario }] }
+  // o lanza error si la página no es la OTST (sesión cerrada) o la tabla cambió
+  function leerSgv(doc, otst) {
+    const filaCot = [...doc.querySelectorAll('tr')].find((r) => r.cells[0] && /^\s*cotizaci[oó]n\s*$/i.test(r.cells[0].textContent));
+    const cotizacion = filaCot && filaCot.cells[1] ? ((filaCot.cells[1].textContent.match(/\d+/) || [])[0] || '') : '';
+    const h = [...doc.querySelectorAll('h2, h3, h4')].find((x) => /acciones sobre cotizaci/i.test(x.textContent));
+    if (!h) {
+      const titulo = `${doc.title} ${doc.querySelector('h1') ? doc.querySelector('h1').textContent : ''}`;
+      if (!new RegExp(`OTST\\s*${otst}\\b`).test(titulo)) throw new Error('no se encontró la OTST (¿se cerró la sesión de la intranet?)');
+      return { otst, cotizacion, sin_cotizacion: !cotizacion, acciones: [] };
+    }
+    const t = h.parentElement.querySelector('table');
+    if (!t) return { otst, cotizacion, sin_cotizacion: false, acciones: [] }; // «No existen acciones para esta cotización»
+    const cab = [...((t.tHead && t.tHead.rows[0]) || t.rows[0]).cells].map((c) => norm(c.textContent));
+    const col = (re) => cab.findIndex((x) => re.test(x));
+    const i = { fecha: col(/^fecha/), tipo: col(/^tipo/), comentario: col(/^comentario/), prox: col(/^prox/), usuario: col(/^usuario/) };
+    if (i.fecha < 0 || i.tipo < 0) throw new Error('la tabla de SGV no tiene Fecha o Tipo (¿cambió la intranet?)');
+    const filas = t.tBodies.length ? [...t.tBodies].flatMap((b) => [...b.rows]) : [...t.rows].slice(1);
+    const acciones = filas.map((r) => {
+      const tx = (k) => (i[k] >= 0 && r.cells[i[k]] ? limpio(r.cells[i[k]].textContent) : '');
+      return { fecha: fechaHoraIso(tx('fecha')), tipo: tx('tipo'), comentario: tx('comentario'), prox: proxIso(tx('prox')), usuario: tx('usuario') };
+    }).filter((a) => a.fecha || a.tipo);
+    return { otst, cotizacion, sin_cotizacion: false, acciones };
+  }
+
+  // Lo mismo que calcula la app (llamadas_sgv_aplicar): cierre = última acción sin
+  // contar Ediciones; seguimiento del asesor = acción más reciente con Prox. Seguimiento
+  function resumirSgv(l) {
+    const orden = l.acciones.map((a, i) => ({ a, i }))
+      .sort((x, y) => (x.a.fecha || '').localeCompare(y.a.fecha || '') || x.i - y.i).map((x) => x.a);
+    const ult = orden.filter((a) => !/^edici/i.test(a.tipo)).pop();
+    const prox = orden.filter((a) => a.prox).pop();
+    const cerrada = !!ult && /^cierre/i.test(ult.tipo);
+    return {
+      cotizacion: l.cotizacion, cerrada,
+      cierre_fecha: cerrada ? ult.fecha : null, cierre_comentario: cerrada ? ult.comentario : '', cierre_usuario: cerrada ? ult.usuario : '',
+      prox_asesor: prox ? prox.prox : null, prox_usuario: prox ? prox.usuario : '', prox_comentario: prox ? prox.comentario : '',
+    };
+  }
+
+  async function leerSgvDeOtst(o) {
+    const r = await fetch(`/stecnico/item/${o}`, { credentials: 'same-origin' });
+    return leerSgv(new DOMParser().parseFromString(await r.text(), 'text/html'), o);
+  }
+
+  const enviarSgv = (lecturas) => enviar({ accion: 'sgv', lecturas });
+
+  // Segundo plano: la app dice qué OTST de la cola faltan por leer (o llevan > 6 h);
+  // una pestaña a la vez, una página cada 1,5 s
+  async function quizasLeerSgv() {
+    if (!GM_getValue(G.token, '')) return;
+    const ahora = Date.now();
+    if (ahora - GM_getValue(G.sgvUltima, 0) < SGV_CADA_MS) return;
+    if (ahora - GM_getValue(G.sgvBloqueo, 0) < SGV_BLOQUEO_MS) return;
+    GM_setValue(G.sgvBloqueo, ahora);
+    GM_setValue(G.sgvUltima, ahora);
+    try {
+      const { otsts } = await enviar({ accion: 'sgv_pendientes', limite: SGV_POR_VUELTA });
+      const lecturas = [];
+      for (const o of otsts || []) {
+        try { lecturas.push(await leerSgvDeOtst(o)); } catch (e) { if (/sesión/.test(e.message)) break; }
+        await espera(SGV_PAUSA_MS);
+      }
+      if (lecturas.length) await enviarSgv(lecturas);
+    } catch (e) {
+      /* sin conexión o sin acceso: se intenta en el próximo intervalo */
+    } finally {
+      GM_setValue(G.sgvBloqueo, 0);
+    }
+  }
+
+  // ═════════════════════════════════════════════
   // Registro de llamadas (bitácora)
   // Al dar Continuar la llamada se guarda en Tampermonkey y se envía cuando carga
   // la página siguiente: si esa página es otra vez el formulario con un error de
@@ -467,6 +567,9 @@
       #hll-cal .c-atajos { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 6px; }
       #hll-cal .c-atajo { border: 1px solid #b7cbe3; background: #fff; color: #0b3d78; border-radius: 12px; padding: 2px 6px; font-size: 10.5px; cursor: pointer; white-space: nowrap; }
       #hll-cal .c-atajo.sug { background: #e3f4e8; border-color: #8fc9a1; color: #1e6b3a; font-weight: 700; }
+      #hll-cal .c-atajo.ase { background: #f3edff; border-color: #b9a2e6; color: #4a2a85; font-weight: 700; }
+      #hll-cal .c-asesor { font-size: 11px; color: #4a2a85; margin-top: 6px; line-height: 1.35; font-weight: 700; }
+      #hll-sgv { border: 1px solid #c8d6e8; border-left: 4px solid #0b6fd6; background: #f3f8fd; color: #0b3d78; }
       #hll-cal .c-resumen { font-size: 11px; color: #6b7a8c; margin-top: 6px; line-height: 1.35; }
       #hll-cal .c-resumen.alerta { color: #c0392b; font-weight: 700; }
       #hll-msgs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0 8px; font-family: Arial, sans-serif; }
@@ -534,12 +637,23 @@
     return { carga, cupoEq, sugerida: s };
   }
   const cargaDe = (f) => (plan ? plan.carga[clave(f)] || 0 : 0);
-  const fechaSugerida = () => (plan ? plan.sugerida : sumarHabiles(new Date(), 2));
+
+  // Cotización en SGV de esta OTST (leída de su página; si falla, la que tiene la app)
+  let sgvRes = null;
+  // Seguimiento del asesor desde mañana: manda sobre la sugerida del equipo
+  function fechaAsesor() {
+    if (!sgvRes || sgvRes.cerrada || !sgvRes.prox_asesor) return null;
+    const f = deClave(sgvRes.prox_asesor);
+    return f > d0(new Date()) ? ajustarHabil(f) : null;
+  }
+  const fuenteSugerida = () => (fechaAsesor() ? 'asesor' : plan ? 'equipo' : 'local');
+  const fechaSugerida = () => fechaAsesor() || (plan ? plan.sugerida : sumarHabiles(new Date(), 2));
 
   // ── Calendario propio, al lado del cuadro de Observación ──
   const cal = { vista: null, input: null };
 
   function actualizarInput(input, fecha) {
+    input.dataset.hllSugerida = 'usuario'; // elegida a mano: ninguna sugerida la vuelve a cambiar
     input.value = formatear(fecha);
     disparar(input);
     try {
@@ -598,15 +712,23 @@
       ['1 semana', () => { const r = new Date(hoy); r.setDate(r.getDate() + 7); return ajustarHabil(r); }],
       ['2 semanas', () => { const r = new Date(hoy); r.setDate(r.getDate() + 14); return ajustarHabil(r); }]];
     if (plan) { const s = plan.sugerida; lista.unshift([`Sugerida ${pad(s.getDate())}/${pad(s.getMonth() + 1)}`, () => s, 'sug']); }
+    const ase = fechaAsesor();
+    if (ase) lista.unshift([`Asesor ${pad(ase.getDate())}/${pad(ase.getMonth() + 1)}`, () => ase, 'ase']);
     lista.forEach(([txt, fn, cls]) => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'c-atajo' + (cls ? ' ' + cls : ''); b.textContent = txt;
       if (cls === 'sug') b.title = 'Primer día hábil desde mañana por debajo del tope de seguimientos del equipo';
+      if (cls === 'ase') b.title = `Prox. Seguimiento que dejó ${sgvRes.prox_usuario || 'el asesor'} en SGV`;
       b.addEventListener('click', () => { const f = fn(); cal.vista = new Date(f.getFullYear(), f.getMonth(), 1); actualizarInput(input, f); });
       atajos.appendChild(b);
     });
     el.appendChild(atajos);
 
     const res = document.createElement('div'); res.className = 'c-resumen';
+    if (ase) {
+      const a = document.createElement('div'); a.className = 'c-asesor';
+      a.textContent = `📅 ${sgvRes.prox_usuario || 'El asesor'} tiene seguimiento en SGV el ${formatear(ase)}.`;
+      el.appendChild(a);
+    }
     if (!sel) res.textContent = 'Elige una fecha';
     else if (!esHabil(sel)) { res.className += ' alerta'; res.textContent = `⚠ ${formatear(sel)} no es día hábil${esFestivo(sel) ? ' (festivo)' : ''}.`; }
     else if (plan && cargaDe(sel) >= plan.cupoEq) {
@@ -640,14 +762,14 @@
     const mostrar = input && visible(input) && /contactar nuevamente/i.test(select.options[select.selectedIndex]?.text || '');
     if (!mostrar) { if (existente && existente.style.display !== 'none') existente.style.display = 'none'; return; }
     cal.input = input;
-    // Fecha sugerida solo si está vacía (nunca pisa lo ya elegido); con el plan del equipo si ya llegó
-    if (!input.value.trim() && !input.dataset.hllSugerida) {
-      input.dataset.hllSugerida = plan ? 'equipo' : 'local';
+    // Fecha sugerida solo si está vacía o la puso una sugerida de menos peso (nunca pisa
+    // lo elegido a mano ni la del grupo): local < equipo < asesor
+    const peso = { local: 0, equipo: 1, asesor: 2 };
+    const fuente = fuenteSugerida();
+    const actual = input.dataset.hllSugerida;
+    if ((!input.value.trim() && !actual) || (actual in peso && peso[fuente] > peso[actual])) {
+      input.dataset.hllSugerida = fuente;
       input.value = formatear(fechaSugerida());
-      disparar(input);
-    } else if (plan && input.dataset.hllSugerida === 'local') {
-      input.dataset.hllSugerida = 'equipo';
-      input.value = formatear(plan.sugerida);
       disparar(input);
     }
     let el = existente;
@@ -655,10 +777,11 @@
       el = document.createElement('div'); el.id = 'hll-cal';
       input.addEventListener('input', () => { cal.vista = null; dibujarCalendario(); });
       input.addEventListener('change', () => { cal.vista = null; dibujarCalendario(); });
+      input.addEventListener('keydown', () => { input.dataset.hllSugerida = 'usuario'; });
     }
     ubicarCalendario(el, input, select);
     if (el.style.display) el.style.display = '';
-    const estado = plan ? 'equipo' : 'local';
+    const estado = fuente;
     if (el.dataset.dibujado !== estado) { el.dataset.dibujado = estado; cal.vista = null; dibujarCalendario(); }
   }
 
@@ -749,6 +872,32 @@
       caja.append(b, ` (lo reservó a las ${hora(ctx.tomada.tomada_en)}). Revisa con esa persona antes de registrar.`);
       insertarAntesDelFormulario(caja, select);
     }
+  }
+
+  // Aviso de la cotización en SGV: cerrada (con su comentario) o con seguimiento del asesor
+  function asegurarAvisoSgv(select) {
+    const caja = document.getElementById('hll-sgv');
+    const ase = fechaAsesor();
+    const firma = !sgvRes ? '' : sgvRes.cerrada ? `c${sgvRes.cierre_fecha}` : ase ? `a${clave(ase)}` : '';
+    if (caja && caja.dataset.firma === firma) return;
+    if (caja) caja.remove();
+    if (!firma) return;
+    const c = document.createElement('div'); c.id = 'hll-sgv'; c.className = 'hll-aviso'; c.dataset.firma = firma;
+    const b = document.createElement('b');
+    const s = document.createElement('small');
+    const cot = sgvRes.cotizacion ? ` ${sgvRes.cotizacion}` : '';
+    if (sgvRes.cerrada) {
+      const f = sgvRes.cierre_fecha ? new Date(sgvRes.cierre_fecha) : null;
+      b.textContent = `🔒 Cotización${cot} cerrada en SGV${f ? ` el ${formatear(f)}` : ''}`;
+      c.append(b, sgvRes.cierre_comentario ? `: «${sgvRes.cierre_comentario}»` : ' (sin comentario)');
+      s.textContent = ` ${sgvRes.cierre_usuario ? `(${sgvRes.cierre_usuario}) ` : ''}— confirma con el cliente y cierra la comunicación.`;
+    } else {
+      b.textContent = `📅 ${sgvRes.prox_usuario || 'El asesor'} tiene seguimiento en SGV el ${formatear(ase)}`;
+      c.append(b, sgvRes.prox_comentario ? `: «${sgvRes.prox_comentario}»` : '');
+      s.textContent = ' — se sugiere esa fecha para el próximo contacto.';
+    }
+    c.append(s);
+    insertarAntesDelFormulario(c, select);
   }
 
   // ── Llamada agrupada por cliente ──
@@ -1130,6 +1279,7 @@
     asegurarCalendario(select);
     asegurarGrupo(select);
     asegurarAvisos(select);
+    asegurarAvisoSgv(select);
   }
 
   async function iniciarFormulario() {
@@ -1137,10 +1287,18 @@
     let t = null;
     new MutationObserver(() => { clearTimeout(t); t = setTimeout(prepararFormulario, 150); })
       .observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
-    if (!GM_getValue(G.token, '')) return;
+    const hayToken = !!GM_getValue(G.token, '');
+    // SGV fresco desde la página de la OTST (no necesita la app; si hay token, se envía)
+    leerSgvDeOtst(otstActual()).then((l) => {
+      sgvRes = resumirSgv(l);
+      prepararFormulario();
+      if (hayToken) enviarSgv([l]).catch(() => { /* lo relee el segundo plano */ });
+    }).catch(() => { /* sin la página: se usa lo que tenga la app */ });
+    if (!hayToken) return;
     try {
       ctx = await enviar({ accion: 'contexto', otst: otstActual() });
       plan = calcularCarga(ctx);
+      if (!sgvRes && ctx.sgv) sgvRes = ctx.sgv;
       prepararFormulario();
     } catch (e) {
       const barra = document.getElementById('hll-msgs');
@@ -1376,6 +1534,10 @@
   setTimeout(enviarPendientes, 4000);
   pintarAvisoGrupo();
   if (ES_LLAMADA) iniciarFormulario();
+  // Al abrir la OTST, su tabla de SGV va a la app al instante
+  if (ES_ITEM && GM_getValue(G.token, '')) {
+    try { enviarSgv([leerSgv(document, otstActual())]).catch(() => { /* lo relee el segundo plano */ }); } catch (e) { /* no es la página esperada */ }
+  }
 
   if (ES_LIBRO && GM_getValue(G.token, '')) {
     GM_setValue(G.bloqueo, Date.now());
@@ -1387,5 +1549,6 @@
   if (ES_FACT && GM_getValue(G.token, '')) { GM_setValue(G.factUltima, Date.now()); enviarFacturacionPagina(); }
   else setTimeout(quizasLeerFacturacion, 20000); // no compite con la lectura del Libro al cargar
   pintarFact();
-  setInterval(() => { quizasReleer(); pintar(); enviarPendientes(); pintarAvisoGrupo(); quizasLeerFacturacion(); pintarFact(); }, REVISAR_MS);
+  setTimeout(quizasLeerSgv, 45000); // después de la cola y la facturación
+  setInterval(() => { quizasReleer(); pintar(); enviarPendientes(); pintarAvisoGrupo(); quizasLeerFacturacion(); pintarFact(); quizasLeerSgv(); }, REVISAR_MS);
 })();
