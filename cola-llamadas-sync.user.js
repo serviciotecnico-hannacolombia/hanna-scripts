@@ -11,6 +11,8 @@
 // @grant        GM_registerMenuCommand
 // @connect      mmawukdxoryswwnjhydl.supabase.co
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/cola-llamadas-sync.user.js
+// @downloadURL  https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/cola-llamadas-sync.user.js
 // ==/UserScript==
 
 // Diseño: docs/llamadas-tiempo-real.md (fases 1 y 3).
