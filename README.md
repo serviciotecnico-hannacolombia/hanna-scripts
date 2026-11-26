@@ -382,11 +382,29 @@ Si escribes una categoría que no es exactamente una de esas 6 (por un typo, o p
 
 ### Agregar/quitar un lineamiento
 
-Solo edita la pestaña "lineamientos" del Sheet — agrega o borra filas ahí. No hay que tocar el script para esto; el cambio se ve reflejado la próxima vez que alguien abra esa OT (el script no cachea entre visitas, siempre pide el dato más reciente al Sheet, y solo usa la copia guardada en el navegador si el Sheet no responde).
+Solo edita la pestaña "lineamientos" del Sheet — agrega o borra filas ahí. No hay que tocar el script para esto.
+
+### Por qué un cambio puede tardar en verse, y cómo hacerlo inmediato
+
+Desde v1.3.0, al abrir la OT el script:
+
+1. Muestra **al instante** la copia guardada en el navegador (la de la última OT que se abrió).
+2. Al mismo tiempo, mientras la página carga, pide el Sheet a Google y **reemplaza** la tarjeta en cuanto llega la versión nueva (o la quita si el cliente ya no tiene lineamientos).
+
+Google ofrece dos formas de leer el Sheet, y el script intenta las dos:
+
+| Forma | ¿Qué tan fresca? | Requisito |
+|---|---|---|
+| **En vivo** (`gviz`) | Lo que hay en el Sheet en ese momento | El Sheet "Patrones de ST" compartido como **"Cualquier persona con el enlace → Lector"** |
+| **Publicada** ("Publicar en la Web") | Google la refresca con **varios minutos de retraso**, y no todos sus servidores tienen la misma copia al mismo tiempo (por eso a veces una persona ve el cambio y otra no) | Ninguno (ya está configurada) |
+
+Mientras el Sheet **no** esté compartido con enlace, la lectura en vivo falla (Google responde 401) y se usa solo la publicada; el script deja de intentar la lectura en vivo por 30 minutos para no hacer peticiones inútiles. **Para que los cambios se vean al instante:** en el Sheet → Compartir → Acceso general → "Cualquier persona con el enlace" → Lector. Ojo: eso deja leer **todas** las pestañas del Sheet a quien tenga el enlace (la pestaña de lineamientos ya es pública hoy por estar publicada en la web).
+
+Si se activa la lectura en vivo, deja la columna **NIT** con formato **Texto sin formato** (Formato → Número → Texto sin formato). La lectura en vivo adivina el tipo de cada columna, y si mezcla números con textos (ej. `900947820` y `860000198-6`) puede devolver vacías las celdas del tipo minoritario.
 
 ### Cómo encuentra el NIT en la página
 
-Usa el mismo método que ya prueba **QR Órdenes de Trabajo**: busca un elemento chico de la página que contenga la palabra "NIT" seguida de números, en vez de depender de un `id` fijo (la intranet no le pone uno a ese bloque). Si el sitio cambia por completo cómo muestra el NIT del cliente y el script deja de encontrarlo, avísale a Brayan con una captura de esa sección de "Ver Detalle".
+Primero lee la fila **"Cliente"** de la tabla de detalle (`table.detailData`, la misma que usa el Planificador de Llamadas). Si no la encuentra, recorre solo los textos de la página que dicen "NIT" y toma el número que sigue (mismo criterio que **QR Órdenes de Trabajo**). Si la OT nunca muestra el NIT, deja de buscar a los 30 s. Si el sitio cambia por completo cómo muestra el NIT del cliente y el script deja de encontrarlo, avísale a Brayan con una captura de esa sección de "Ver Detalle".
 
 ### Renombrar etiquetas de la tabla de "Ver Detalle"
 

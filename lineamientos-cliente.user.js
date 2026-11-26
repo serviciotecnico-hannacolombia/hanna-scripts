@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Lineamientos del Cliente - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      1.2.0
+// @version      1.3.0
 // @description  Muestra los lineamientos especiales del cliente (por NIT), leídos de Google Sheets, debajo de la tarjeta de Estado; y renombra un par de etiquetas de la tabla de detalle. Todo en "Ver Detalle" de la OT.
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/stecnico/item/*
 // @grant        none
-// @run-at       document-idle
+// @run-at       document-start
 // @updateURL    https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/lineamientos-cliente.user.js
 // @downloadURL  https://raw.githubusercontent.com/serviciotecnico-hannacolombia/hanna-scripts/main/lineamientos-cliente.user.js
 // ==/UserScript==
@@ -15,13 +15,31 @@
   'use strict';
 
   // Debe coincidir siempre con @version del header de arriba.
-  const APP_VERSION = '1.2.0';
+  const APP_VERSION = '1.3.0';
 
   // ─────────────────────────────────────────────
   // CONFIGURACIÓN
   // ─────────────────────────────────────────────
-  const LINEAMIENTOS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT2t_Y1keodEQiK9Iv4C8PoYmkAe-dFDgVek2z4fAr9IACCV-XDzFvB8jnrBB6J5t4uUwgpwn2W9CSz/pub?gid=256491155&single=true&output=csv';
+  // Sheet "Patrones de ST", pestaña "lineamientos".
+  const SHEET_ID = '1AzJX5B-myRtumple68r7ZXGpE7Xc3nLtkddG5i9rD98';
+  const GID_LINEAMIENTOS = '256491155';
+
+  // Lectura EN VIVO (gviz): trae lo que hay en el Sheet en este momento.
+  // Solo funciona si el Sheet está compartido como "Cualquier persona con el
+  // enlace puede ver"; si no, Google responde 401 y se usa la copia publicada.
+  const URL_EN_VIVO = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID +
+    '/gviz/tq?tqx=out:csv&headers=1&gid=' + GID_LINEAMIENTOS;
+
+  // Copia "Publicar en la Web": siempre funciona, pero Google la refresca con
+  // varios minutos de retraso (y no todos sus servidores tienen la misma
+  // copia al mismo tiempo), así que un cambio recién hecho puede no verse aún.
+  const URL_PUBLICADA = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT2t_Y1keodEQiK9Iv4C8PoYmkAe-dFDgVek2z4fAr9IACCV-XDzFvB8jnrBB6J5t4uUwgpwn2W9CSz/pub?gid=' + GID_LINEAMIENTOS + '&single=true&output=csv';
+
   const CACHE_KEY = 'hanna_lineamientos_cache_v1';
+  // Si la lectura en vivo falla (Sheet no compartido), no se vuelve a intentar
+  // durante este tiempo, para no hacer una petición inútil en cada OT.
+  const EN_VIVO_PAUSA_KEY = 'hanna_lineamientos_envivo_pausa_hasta';
+  const EN_VIVO_PAUSA_MS = 30 * 60 * 1000;
 
   // Orden fijo en el que se muestran las categorías conocidas, sin importar
   // el orden de las filas en el Sheet. Cualquier categoría que alguien
@@ -88,36 +106,55 @@
   }
 
   // ─────────────────────────────────────────────
-  // Extracción del NIT/nombre del cliente de la página. Mismo patrón ya
-  // probado en qr-ordenes-trabajo.user.js: busca un elemento chico (pocos
-  // hijos, poco texto) que contenga "NIT", en vez de depender de un id/clase
-  // fijo que la intranet podría no tener o cambiar.
+  // Extracción del NIT del cliente de la página:
   //   Cliente    FRUDELPA FRUTOS DEL PACIFICO S.A.S
   //              NIT: 900947820
   //              Nº Manager: 78967
+  // 1) Camino rápido: la fila "Cliente" de la tabla de detalle
+  //    (table.detailData, igual que planificador-llamadas.user.js).
+  // 2) Respaldo, por si la intranet cambia esa tabla: recorre SOLO los textos
+  //    que dicen "NIT" y sube por sus contenedores (mismo criterio que
+  //    qr-ordenes-trabajo.user.js: elemento chico, pocos hijos, poco texto),
+  //    en vez de leer el texto de TODOS los elementos de la página.
   // ─────────────────────────────────────────────
-  function getClienteEmpresa() {
-    const result = { nombre: null, nit: null };
-    try {
-      for (const el of document.querySelectorAll('*')) {
-        if (el.children.length > 6) continue;
-        const text = el.textContent || '';
-        if (text.length > 400 || !/\bNIT\b/i.test(text)) continue;
+  const RE_NIT = /NIT:?\s*([\d.\-]{5,20})/i;
 
-        const nitMatch = text.match(/NIT:?\s*([\d.\-]{5,20})/i);
-        if (!nitMatch) continue;
+  function nitDesdeTablaDetalle() {
+    for (const fila of document.querySelectorAll('table.detailData tr')) {
+      if (!fila.cells || fila.cells.length < 2) continue;
+      if (!/^\s*cliente\s*$/i.test(fila.cells[0].textContent || '')) continue;
+      const m = (fila.cells[1].textContent || '').match(RE_NIT);
+      return m ? normalizarNit(m[1]) : null;
+    }
+    return null;
+  }
 
-        const cleaned = text.replace(/\s+/g, ' ').trim();
-        const nombreMatch = cleaned.match(/cliente\s+([A-ZÁÉÍÓÚÜÑ0-9][A-ZÁÉÍÓÚÜÑ0-9A-Za-záéíóúüñ.,&\s-]{3,80}?)\s+NIT/i);
-
-        result.nit = normalizarNit(nitMatch[1]);
-        if (nombreMatch) result.nombre = nombreMatch[1].trim();
-        break;
+  function nitDesdeTextos() {
+    const recorrido = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (/\bNIT\b/i.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+    });
+    for (let nodo = recorrido.nextNode(); nodo; nodo = recorrido.nextNode()) {
+      // El contenedor más externo que siga siendo "chico" (≤ 400 caracteres)
+      // y tenga pocos hijos; así entran el NIT y su número aunque estén en
+      // etiquetas separadas (ej. <b>NIT:</b> 900947820).
+      let elegido = null;
+      for (let el = nodo.parentElement; el && el !== document.body; el = el.parentElement) {
+        const texto = el.textContent || '';
+        if (texto.length > 400) break;
+        if (el.children.length <= 6 && RE_NIT.test(texto)) elegido = el;
       }
+      if (elegido) return normalizarNit(elegido.textContent.match(RE_NIT)[1]);
+    }
+    return null;
+  }
+
+  function getNitCliente() {
+    try {
+      return nitDesdeTablaDetalle() || nitDesdeTextos();
     } catch (e) {
       console.warn('[Lineamientos Cliente] No se pudo extraer el NIT del cliente:', e);
+      return null;
     }
-    return result;
   }
 
   // ─────────────────────────────────────────────
@@ -259,49 +296,132 @@
     return tarjeta;
   }
 
-  function procesar(textoCSV, nit, cajaEstado) {
-    const filas = parseCSV(textoCSV);
-    const datos = agruparLineamientos(filas, nit);
-    if (!datos) return; // sin lineamientos para este cliente: no se muestra nada
-    const tarjeta = construirTarjeta(datos);
-    cajaEstado.insertAdjacentElement('afterend', tarjeta);
+  // ─────────────────────────────────────────────
+  // DATOS: hasta tres fuentes, de la menos a la más fresca. Se pinta la más
+  // fresca que haya llegado, sin esperar a las demás:
+  //   0 = copia guardada en este navegador (instantánea, de la última visita)
+  //   1 = copia publicada de Google (puede ir unos minutos atrasada)
+  //   2 = lectura en vivo (solo si el Sheet está compartido con enlace)
+  // Las descargas arrancan apenas carga el script, en paralelo con la página,
+  // en vez de esperar a que la página termine de cargar.
+  // ─────────────────────────────────────────────
+  let filasActuales = null;
+  let prioridadActual = -1;
+  let nitCliente = null;
+  let cajaEstado = null;
+  let tarjetaActual = null;
+
+  function leerLS(clave) {
+    try { return localStorage.getItem(clave); } catch (e) { return null; }
+  }
+  function guardarLS(clave, valor) {
+    try { localStorage.setItem(clave, valor); } catch (e) { /* sin caché, no pasa nada */ }
   }
 
-  let yaInyectado = false;
+  function esCSVLineamientos(filas) {
+    const enc = (filas[0] || []).map((h) => h.trim().toLowerCase());
+    return enc.indexOf('nit') > -1 && enc.indexOf('categoria') > -1 && enc.indexOf('lineamiento') > -1;
+  }
 
-  function intentarInyectar() {
-    if (yaInyectado) return;
+  // Devuelve true si el texto es un CSV de lineamientos válido (se use o no).
+  function recibirCSV(texto, prioridad) {
+    const filas = parseCSV(texto || '');
+    if (!esCSVLineamientos(filas)) return false;
+    if (prioridad < prioridadActual) return true; // ya hay algo más fresco en pantalla
+    filasActuales = filas;
+    prioridadActual = prioridad;
+    if (prioridad > 0) guardarLS(CACHE_KEY, texto);
+    pintar();
+    return true;
+  }
 
-    const { nit } = getClienteEmpresa();
-    if (!nit) return; // el bloque "Cliente" con el NIT todavía no cargó
+  function descargar(url) {
+    return fetch(url, { cache: 'no-store', credentials: 'omit' }).then((r) => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    });
+  }
 
-    const cajaEstado = document.querySelector('.boxTopItemDestacado');
-    if (!cajaEstado) return; // la tarjeta de "Estado" todavía no está en el DOM
+  function cargarDatos() {
+    const copia = leerLS(CACHE_KEY);
+    if (copia) recibirCSV(copia, 0);
 
-    yaInyectado = true;
-    if (observador) observador.disconnect();
+    const pausaHasta = Number(leerLS(EN_VIVO_PAUSA_KEY)) || 0;
+    if (Date.now() >= pausaHasta) {
+      descargar(URL_EN_VIVO)
+        .then((texto) => {
+          if (!recibirCSV(texto, 2)) throw new Error('la respuesta no es el CSV de lineamientos');
+        })
+        .catch((err) => {
+          guardarLS(EN_VIVO_PAUSA_KEY, String(Date.now() + EN_VIVO_PAUSA_MS));
+          console.info('[Lineamientos Cliente] Lectura en vivo no disponible (¿el Sheet está compartido con enlace?); se usa la copia publicada.', (err && err.message) || err);
+        });
+    }
 
-    fetch(LINEAMIENTOS_CSV_URL, { cache: 'no-store' })
-      .then((r) => r.text())
+    descargar(URL_PUBLICADA)
       .then((texto) => {
-        try { localStorage.setItem(CACHE_KEY, texto); } catch (e) { /* sin caché, no pasa nada */ }
-        procesar(texto, nit, cajaEstado);
+        if (!recibirCSV(texto, 1)) {
+          console.warn('[Lineamientos Cliente] No se encontraron las columnas esperadas (NIT/Categoria/Lineamiento) en el Sheet.');
+        }
       })
       .catch((err) => {
-        console.warn('[Lineamientos Cliente] No se pudo descargar el Sheet, usando última copia guardada.', err);
-        let cache = null;
-        try { cache = localStorage.getItem(CACHE_KEY); } catch (e) { /* nada que usar */ }
-        if (cache) procesar(cache, nit, cajaEstado);
+        console.warn('[Lineamientos Cliente] No se pudo descargar el Sheet publicado; se usa la última copia guardada.', err);
       });
   }
 
-  const observador = new MutationObserver(() => {
+  // Pinta (o actualiza, o quita) la tarjeta con los datos más frescos. Se
+  // llama cada vez que llega una fuente nueva y cuando la página ya tiene el
+  // NIT y la tarjeta de Estado.
+  function pintar() {
+    if (!filasActuales || !nitCliente || !cajaEstado) return;
+    const datos = agruparLineamientos(filasActuales, nitCliente);
+    const nueva = datos ? construirTarjeta(datos) : null;
+    // Mismo contenido que ya se ve: no se toca (no parpadea ni pierde el scroll).
+    if (tarjetaActual && nueva && tarjetaActual.innerHTML === nueva.innerHTML) return;
+    if (tarjetaActual) tarjetaActual.remove();
+    tarjetaActual = nueva;
+    if (nueva) cajaEstado.insertAdjacentElement('afterend', nueva);
+  }
+
+  // ─────────────────────────────────────────────
+  // PÁGINA: espera a que estén el NIT y la tarjeta de Estado. Los cambios
+  // del DOM se agrupan (una revisión cada 100 ms como mucho) y se deja de
+  // vigilar a los 30 s si la OT nunca muestra el NIT.
+  // ─────────────────────────────────────────────
+  let observador = null;
+  let revisionPendiente = false;
+
+  function revisarPagina() {
+    revisionPendiente = false;
     renombrarEtiquetas();
-    intentarInyectar();
-  });
-  observador.observe(document.body, { childList: true, subtree: true });
-  renombrarEtiquetas();
-  intentarInyectar();
+    if (!nitCliente) nitCliente = getNitCliente();
+    if (!cajaEstado) cajaEstado = document.querySelector('.boxTopItemDestacado');
+    if (nitCliente && cajaEstado) {
+      if (observador) observador.disconnect();
+      pintar();
+    }
+  }
+
+  function programarRevision() {
+    if (revisionPendiente) return;
+    revisionPendiente = true;
+    setTimeout(revisarPagina, 100);
+  }
+
+  function iniciarPagina() {
+    revisarPagina();
+    if (nitCliente && cajaEstado) return;
+    observador = new MutationObserver(programarRevision);
+    observador.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => observador.disconnect(), 30000);
+  }
+
+  cargarDatos();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', iniciarPagina, { once: true });
+  } else {
+    iniciarPagina();
+  }
 
   console.log('[Lineamientos Cliente] v' + APP_VERSION + ' cargado.');
 })();
