@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Cola de Llamadas Sync - Hanna Colombia
 // @namespace    https://intranet.hannacolombia.com/
-// @version      0.5.1
-// @description  Conecta la intranet con la app de Servicio Técnico (módulo Llamadas). En el Libro de Trabajo: envía la lista "Esperando Llamada Seguimiento Diagnóstico" (y la relee cada 10 min con cualquier pestaña de la intranet abierta). En el formulario "Llamada de Seguimiento Diagnóstico": fecha sugerida con la carga real del equipo, calendario con festivos, mensajes rápidos compartidos, avisos de prioritaria y de quién está llamando, llamada agrupada por cliente, avisos de la cotización en SGV (cerrada o con seguimiento del asesor) y registro de la llamada en la bitácora al dar Continuar. Lee las «Acciones sobre cotización en SGV» de cada OTST (al abrirla y en segundo plano). Nunca presiona Continuar por ti (salvo el cierre automático del grupo, si lo activas en la app). En el reporte "Facturación Servicio Técnico In-situ": envía la facturación del mes a Indicadores (y la relee cada 15 min).
+// @version      0.6.0
+// @description  Conecta la intranet con la app de Servicio Técnico (módulo Llamadas). En el Libro de Trabajo: envía la lista "Esperando Llamada Seguimiento Diagnóstico" (y la relee cada 10 min con cualquier pestaña de la intranet abierta). En el formulario "Llamada de Seguimiento Diagnóstico": fecha sugerida con la carga real del equipo, calendario con festivos, mensajes rápidos compartidos, avisos de prioritaria y de quién está llamando, llamada agrupada por cliente, avisos de la cotización en SGV (cerrada o con seguimiento del asesor), resultado de la llamada al reprogramar (contestó, no contesta, buzón o gestionado por otro; con aviso de intentos seguidos sin respuesta y reintento al siguiente día hábil) y registro de la llamada en la bitácora al dar Continuar. Lee las «Acciones sobre cotización en SGV» de cada OTST (al abrirla y en segundo plano). Nunca presiona Continuar por ti (salvo el cierre automático del grupo, si lo activas en la app). En el reporte "Facturación Servicio Técnico In-situ": envía la facturación del mes a Indicadores (y la relee cada 15 min).
 // @author       Servicio Técnico Hanna Colombia
 // @match        https://intranet.hannacolombia.com/*
 // @grant        GM_xmlhttpRequest
@@ -29,7 +29,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.5.1';
+  const VERSION = '0.6.0';
   const ENDPOINT = 'https://mmawukdxoryswwnjhydl.supabase.co/functions/v1/llamadas-sync';
   const URL_LIBRO = '/stecnico/libro_trabajo';
   const ES_LIBRO = location.pathname.startsWith(URL_LIBRO);
@@ -604,6 +604,23 @@
       #hll-msgs .m-chip button { border: 0; background: transparent; cursor: pointer; font-size: 12px; color: #0b3d78; padding: 5px 10px; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       #hll-msgs .m-chip .m-x { padding: 5px 8px 5px 4px; color: #8a97a6; }
       #hll-msgs .m-guardar { border: 1px dashed #8fb0d6; background: #fff; color: #0b3d78; border-radius: 14px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+      #hll-res { margin: 4px 0 10px; padding: 9px 12px; border: 1px solid #c8d6e8; border-left: 4px solid #0b6fd6; border-radius: 8px; background: #f7faff; font-family: Arial, sans-serif; font-size: 13px; color: #1f2d3d; }
+      #hll-res.falta { border-color: #f1b8b0; border-left-color: #c0392b; background: #fff8f6; }
+      #hll-res .r-tit { font-weight: 700; color: #0b3d78; margin-bottom: 6px; }
+      #hll-res .r-tit small { font-weight: 400; color: #6b7a8c; }
+      #hll-res .r-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+      #hll-res .r-btn { border: 1px solid #b7cbe3; background: #fff; color: #0b3d78; border-radius: 14px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; }
+      #hll-res .r-btn:hover { background: #eef3f9; }
+      #hll-res .r-btn.sel { background: #0b6fd6; border-color: #0b6fd6; color: #fff; font-weight: 700; }
+      #hll-res .r-btn.sin.sel { background: #c56a00; border-color: #c56a00; }
+      #hll-res .r-nota { margin-top: 6px; font-size: 11.5px; color: #6b7a8c; }
+      #hll-res .r-racha { margin-top: 7px; font-size: 12.5px; color: #7a5a00; }
+      #hll-res .r-racha.amarillo { color: #8a6100; font-weight: 700; }
+      #hll-res .r-racha.rojo { color: #c0392b; font-weight: 700; }
+      #hll-res .r-falta { margin-top: 6px; color: #c0392b; font-weight: 700; }
+      #hll-res .r-falta:empty { display: none; }
+      #hll-cal .c-atajo.rei { background: #fff4e5; border-color: #f0b46a; color: #8a4b00; font-weight: 700; }
+      #hll-cal .c-reintento { font-size: 11px; color: #8a4b00; margin-top: 6px; line-height: 1.35; font-weight: 700; }
       .hll-aviso { margin: 4px 0 10px; padding: 8px 12px; border-radius: 8px; font-family: Arial, sans-serif; font-size: 13px; }
       .hll-aviso small { color: #6b7a8c; }
       #hll-prio { border: 1px solid #f1b8b0; border-left: 4px solid #c0392b; background: #fff8f6; color: #a52a1a; }
@@ -671,8 +688,9 @@
     const f = deClave(sgvRes.prox_asesor);
     return f > d0(new Date()) ? ajustarHabil(f) : null;
   }
-  const fuenteSugerida = () => (fechaAsesor() ? 'asesor' : plan ? 'equipo' : 'local');
-  const fechaSugerida = () => fechaAsesor() || (plan ? plan.sugerida : sumarHabiles(new Date(), 2));
+  // Si no contestó, manda el reintento (siguiente día hábil); luego el asesor, luego el equipo
+  const fuenteSugerida = () => (fechaReintento() ? 'reintento' : fechaAsesor() ? 'asesor' : plan ? 'equipo' : 'local');
+  const fechaSugerida = () => fechaReintento() || fechaAsesor() || (plan ? plan.sugerida : sumarHabiles(new Date(), 2));
 
   // ── Calendario propio, al lado del cuadro de Observación ──
   const cal = { vista: null, input: null };
@@ -739,16 +757,24 @@
     if (plan) { const s = plan.sugerida; lista.unshift([`Sugerida ${pad(s.getDate())}/${pad(s.getMonth() + 1)}`, () => s, 'sug']); }
     const ase = fechaAsesor();
     if (ase) lista.unshift([`Asesor ${pad(ase.getDate())}/${pad(ase.getMonth() + 1)}`, () => ase, 'ase']);
+    const rei = fechaReintento();
+    if (rei) lista.unshift([`Reintento ${pad(rei.getDate())}/${pad(rei.getMonth() + 1)}`, () => rei, 'rei']);
     lista.forEach(([txt, fn, cls]) => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'c-atajo' + (cls ? ' ' + cls : ''); b.textContent = txt;
       if (cls === 'sug') b.title = 'Primer día hábil desde mañana por debajo del tope de seguimientos del equipo';
       if (cls === 'ase') b.title = `Prox. Seguimiento que dejó ${sgvRes.prox_usuario || 'el asesor'} en SGV`;
+      if (cls === 'rei') b.title = 'No contestó: siguiente día hábil, en otra franja del día';
       b.addEventListener('click', () => { const f = fn(); cal.vista = new Date(f.getFullYear(), f.getMonth(), 1); actualizarInput(input, f); });
       atajos.appendChild(b);
     });
     el.appendChild(atajos);
 
     const res = document.createElement('div'); res.className = 'c-resumen';
+    if (rei) {
+      const a = document.createElement('div'); a.className = 'c-reintento';
+      a.textContent = `📵 No contestó: reintenta el ${formatear(rei)}, ${franjaReintento()}.`;
+      el.appendChild(a);
+    }
     if (ase) {
       const a = document.createElement('div'); a.className = 'c-asesor';
       a.textContent = `📅 ${sgvRes.prox_usuario || 'El asesor'} tiene seguimiento en SGV el ${formatear(ase)}.`;
@@ -788,11 +814,13 @@
     if (!mostrar) { if (existente && existente.style.display !== 'none') existente.style.display = 'none'; return; }
     cal.input = input;
     // Fecha sugerida solo si está vacía o la puso una sugerida de menos peso (nunca pisa
-    // lo elegido a mano ni la del grupo): local < equipo < asesor
-    const peso = { local: 0, equipo: 1, asesor: 2 };
+    // lo elegido a mano ni la del grupo): local < equipo < asesor < reintento. Si se quita
+    // el «no contesta», la del reintento vuelve a la sugerida que toque.
+    const peso = { local: 0, equipo: 1, asesor: 2, reintento: 3 };
     const fuente = fuenteSugerida();
     const actual = input.dataset.hllSugerida;
-    if ((!input.value.trim() && !actual) || (actual in peso && peso[fuente] > peso[actual])) {
+    if ((!input.value.trim() && !actual)
+      || (actual in peso && (peso[fuente] > peso[actual] || (actual === 'reintento' && fuente !== 'reintento')))) {
       input.dataset.hllSugerida = fuente;
       input.value = formatear(fechaSugerida());
       disparar(input);
@@ -870,6 +898,134 @@
     }
     const estado = ctx ? 'ctx' : 'sin';
     if (barra.dataset.estado !== estado) { barra.dataset.estado = estado; dibujarMensajes(barra, area); }
+  }
+
+  // ── Resultado de la llamada (al reprogramar) ──
+  // La intranet solo distingue «efectivo» de «contactar nuevamente»: al reprogramar se
+  // pide qué pasó, para medir los clientes que no contestan (docs/llamadas-tiempo-real.md).
+  // Obligatorio; se preselecciona por el texto de la observación (mismas frases que
+  // llamadas_resultado_de_texto en la base) y, en una llamada agrupada, por el resultado
+  // de la primera OTST del grupo.
+  const RESULTADOS = [
+    ['contesto', '💬 Contestó', 'Habló con el cliente (o su contacto) y quedó otra fecha'],
+    ['no_contesta', '📵 No contesta', 'Se llamó y nadie contestó'],
+    ['buzon', '📭 Buzón / apagado / número errado', 'Entra a buzón, está apagado o el número no sirve'],
+    ['sin_llamada', '↪ Gestionado por otro', 'No se llamó: lo gestionó otra persona (p. ej. el comercial). No cuenta como llamada'],
+  ];
+  const SIN_RESPUESTA = ['no_contesta', 'buzon'];
+  const TEXTO_NO_CONTESTA = 'Cliente no atiende a las llamadas. Se deja mensaje por WhatsApp.';
+  let resultado = null;          // el elegido o preseleccionado
+  let resultadoOrigen = '';      // 'usuario' | 'texto' | 'grupo'
+
+  function resultadoDeTexto(t) {
+    const s = (t || '').replace(RE_ENCABEZADO, '');
+    if (/buz[oó]n|apagad|fuera de servicio|no timbra|n[uú]mero (errado|equivocado|no existe|incorrecto)/i.test(s)) return 'buzon';
+    if (/no\s*(contesta|contest[oó]|responde|respondi[oó]|atiende|atendi[oó])|sin respuesta|no hay respuesta|no se obtiene respuesta|no fue posible (el )?contact|no se logr[oó] (el )?contact/i.test(s)) return 'no_contesta';
+    if (/no se realiz[aó] (el )?contacto/i.test(s)) return 'sin_llamada';
+    return null;
+  }
+
+  const pideResultado = (select) => /contactar nuevamente/i.test(select.options[select.selectedIndex]?.text || '');
+
+  // Intentos seguidos sin respuesta con este cliente (la OTST con más) y si ya hubo uno hoy
+  function rachaCliente() {
+    if (!ctx) return null;
+    const yo = ctx.cola.find((f) => f.otst === otstActual());
+    if (!yo) return null;
+    const hoyK = clave(new Date());
+    const filas = ctx.cola.filter((f) => !f.salio_en && f.cliente === yo.cliente && f.garantia === yo.garantia);
+    const n = Math.max(0, ...filas.map((f) => f.sin_respuesta || 0));
+    const hoy = filas.some((f) => f.sin_respuesta_ultimo && clave(new Date(f.sin_respuesta_ultimo)) === hoyK);
+    const ultimo = filas.map((f) => f.sin_respuesta_ultimo).filter(Boolean).sort().pop() || null;
+    return { n, hoy, ultimo };
+  }
+
+  // No contestó: reintentar el siguiente día hábil, en la otra franja del día
+  const fechaReintento = () => (resultado && SIN_RESPUESTA.includes(resultado) ? sigHabil(new Date()) : null);
+  const franjaReintento = () => (new Date().getHours() < 12 ? 'en la tarde' : 'en la mañana');
+
+  function elegirResultado(r, origen, select) {
+    resultado = r; resultadoOrigen = origen;
+    const area = areaObservacion(select);
+    // 📵 con la observación vacía: el texto estándar (el mismo que usa el equipo)
+    if (origen === 'usuario' && r === 'no_contesta' && area && !area.value.replace(RE_ENCABEZADO, '').trim()) cargarMensaje(area, TEXTO_NO_CONTESTA);
+    dibujarResultado(select);
+    asegurarCalendario(select);
+  }
+
+  function dibujarResultado(select) {
+    const caja = document.getElementById('hll-res');
+    if (!caja) return;
+    caja.innerHTML = '';
+    const tit = document.createElement('div'); tit.className = 'r-tit';
+    tit.textContent = '¿Qué pasó en la llamada? ';
+    const req = document.createElement('small'); req.textContent = '(obligatorio para continuar)';
+    tit.appendChild(req);
+    const fila = document.createElement('div'); fila.className = 'r-btns';
+    RESULTADOS.forEach(([v, txt, ayuda]) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = txt; b.title = ayuda;
+      b.className = 'r-btn' + (resultado === v ? ' sel' : '') + (SIN_RESPUESTA.includes(v) ? ' sin' : '');
+      b.addEventListener('click', () => elegirResultado(v, 'usuario', select));
+      fila.appendChild(b);
+    });
+    caja.append(tit, fila);
+    const nota = document.createElement('div'); nota.className = 'r-nota';
+    if (resultado && resultadoOrigen !== 'usuario') {
+      nota.textContent = resultadoOrigen === 'grupo' ? 'Preseleccionado: es el resultado que registraste en la primera OTST de este cliente.'
+        : 'Preseleccionado por el texto de la observación. Cámbialo si no es así.';
+    }
+    const racha = rachaCliente();
+    if (racha && resultado && SIN_RESPUESTA.includes(resultado)) {
+      const n = racha.hoy ? racha.n : racha.n + 1;
+      const f = fechaReintento();
+      const r = document.createElement('div'); r.className = 'r-racha' + (n >= 3 ? ' rojo' : n >= 2 ? ' amarillo' : '');
+      r.textContent = `📵 ${n === 1 ? 'Primer intento' : `${n}.º intento seguido`} sin respuesta con este cliente.`
+        + (n >= 3 ? ' Escala al asesor o aplica el protocolo.' : n >= 2 ? ' Cambia de canal (WhatsApp, correo) o de hora.' : '')
+        + ` Se sugiere reintentar el ${formatear(f)}, ${franjaReintento()}.`;
+      caja.appendChild(r);
+    } else if (racha && racha.n > 0 && !racha.hoy) {
+      const r = document.createElement('div'); r.className = 'r-racha' + (racha.n >= 3 ? ' rojo' : racha.n >= 2 ? ' amarillo' : '');
+      r.textContent = `📵 Este cliente lleva ${racha.n} ${racha.n === 1 ? 'intento' : 'intentos seguidos'} sin respuesta`
+        + (racha.ultimo ? ` (el último el ${formatear(new Date(racha.ultimo))} a las ${pad(new Date(racha.ultimo).getHours())}:${pad(new Date(racha.ultimo).getMinutes())})` : '') + '.';
+      caja.appendChild(r);
+    }
+    if (nota.textContent) caja.appendChild(nota);
+    const falta = document.createElement('div'); falta.className = 'r-falta'; falta.id = 'hll-res-falta';
+    caja.appendChild(falta);
+  }
+
+  function asegurarResultado(select) {
+    let caja = document.getElementById('hll-res');
+    if (!pideResultado(select)) { if (caja) caja.style.display = 'none'; return; }
+    const area = areaObservacion(select);
+    if (!caja) {
+      caja = document.createElement('div'); caja.id = 'hll-res';
+      insertarAntesDelFormulario(caja, select);
+      // Preselección: el resultado de la primera OTST del grupo, o el texto
+      const g = GM_getValue(G.grupo, null);
+      if (g && g.resultado && (g.faltan || []).includes(otstActual())) { resultado = g.resultado; resultadoOrigen = 'grupo'; }
+      if (area) area.addEventListener('input', () => {
+        if (resultadoOrigen === 'usuario' || resultadoOrigen === 'grupo') return;
+        const r = resultadoDeTexto(area.value);
+        if (r !== resultado) { resultado = r; resultadoOrigen = r ? 'texto' : ''; dibujarResultado(select); asegurarCalendario(select); }
+      });
+      if (!resultado && area) { const r = resultadoDeTexto(area.value); if (r) { resultado = r; resultadoOrigen = 'texto'; } }
+      caja.dataset.estado = '';
+    }
+    caja.style.display = '';
+    const estado = `${resultado}|${resultadoOrigen}|${ctx ? 'ctx' : ''}`;
+    if (caja.dataset.estado !== estado) { caja.dataset.estado = estado; dibujarResultado(select); }
+  }
+
+  // Sin resultado no se puede continuar (solo al reprogramar)
+  function exigirResultado(e, select) {
+    if (!pideResultado(select) || resultado) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const caja = document.getElementById('hll-res');
+    const falta = document.getElementById('hll-res-falta');
+    if (falta) falta.textContent = '⚠ Elige qué pasó en la llamada para poder continuar.';
+    if (caja) { caja.classList.add('falta'); caja.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
   }
 
   // ── Avisos: prioritaria y reserva de otra persona ──
@@ -1262,7 +1418,8 @@
     const enc = area ? leerEncabezado(area.value) : null;
     const enGrupo = enc && enc.otsts.includes(otst);
     encolarLlamada({
-      id: uuid(), otst, accion: efectivo ? 'efectiva' : 'reprogramada', proximo_contacto: fecha ? clave(fecha) : null,
+      id: uuid(), otst, accion: efectivo ? 'efectiva' : 'reprogramada', resultado: efectivo ? null : resultado,
+      proximo_contacto: fecha ? clave(fecha) : null,
       observacion: area ? area.value : '', contacto: inContacto ? inContacto.value.trim() : '',
       grupo: enGrupo ? enc.seguimiento : null, otsts_grupo: enGrupo ? enc.otsts : [], automatica: false,
     });
@@ -1272,7 +1429,8 @@
       const faltan = enc.otsts.filter((o) => o !== otst && !regs.has(o)
         && !(ctx && ctx.config.auto_cierre_grupo && otst === enc.seguimiento));
       const fila = filaDe(otst);
-      GM_setValue(G.grupo, faltan.length ? { faltan, cliente: fila ? fila.cliente : '', ts: Date.now() } : null);
+      // El resultado se recuerda para preseleccionarlo en las demás OTST del cliente
+      GM_setValue(G.grupo, faltan.length ? { faltan, cliente: fila ? fila.cliente : '', ts: Date.now(), resultado: efectivo ? null : resultado } : null);
     } else {
       const g = GM_getValue(G.grupo, null);
       if (g && g.faltan) GM_setValue(G.grupo, { ...g, faltan: g.faltan.filter((o) => o !== otst) });
@@ -1288,12 +1446,15 @@
     if (primeraVez) {
       primeraVez = false;
       if (!select.value) elegirAccion(select, false); // por defecto «Contactar nuevamente»
-      select.addEventListener('change', () => setTimeout(() => asegurarCalendario(select), 60));
+      select.addEventListener('change', () => setTimeout(() => { asegurarResultado(select); asegurarCalendario(select); }, 60));
       const btn = botonContinuar();
-      // Primero el cierre automático del grupo (opción B), luego la confirmación de «contacto efectivo»
+      // Primero el resultado (obligatorio al reprogramar), luego el cierre automático del
+      // grupo (opción B) y la confirmación de «contacto efectivo»
+      if (btn) btn.addEventListener('click', (e) => exigirResultado(e, select), true);
       if (btn) btn.addEventListener('click', (e) => autoGrupo(e, select), true);
       if (btn) btn.addEventListener('click', (e) => proteger(e, select), true);
       if (select.form) {
+        select.form.addEventListener('submit', (e) => exigirResultado(e, select), true);
         select.form.addEventListener('submit', (e) => autoGrupo(e, select), true);
         select.form.addEventListener('submit', (e) => proteger(e, select), true);
         // Fase de burbuja: solo registra si nadie canceló el envío
@@ -1301,6 +1462,7 @@
       }
     }
     asegurarMensajes(select);
+    asegurarResultado(select);
     asegurarCalendario(select);
     asegurarGrupo(select);
     asegurarAvisos(select);
